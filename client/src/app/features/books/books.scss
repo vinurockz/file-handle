@@ -1,0 +1,46 @@
+:host {
+  display: block;
+  height: 100%;
+}
+.book-canvas {
+  width: min(560px, 100%);
+  box-shadow: var(--shadow);
+}
+.page-thumb {
+  background: none;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  padding: 3px;
+  cursor: pointer;
+  font: inherit;
+}
+.page-thumb.active {
+  border-color: var(--accent);
+}
+.page-thumb app-page-view {
+  pointer-events: none;
+}
+.reader {
+  position: relative;
+  width: min(520px, 100%);
+  perspective: 1800px;
+  box-shadow: var(--shadow);
+}
+.flip {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  backface-visibility: hidden;
+  animation: flip 0.7s ease-in forwards;
+}
+@keyframes flip {
+  to {
+    transform: rotateY(-180deg);
+  }
+}
+.print-page {
+  break-after: page;
+  width: 100%;
+  max-width: 700px;
+  margin: 0 auto;
+}

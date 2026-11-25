@@ -1,0 +1,121 @@
+{
+    "$schema":  "./node_modules/@angular/cli/lib/config/schema.json",
+    "version":  1,
+    "cli":  {
+                "packageManager": "npm",
+                "analytics": "0dce5716-ba59-41b5-8477-7b999d192e2d"
+            },
+    "newProjectRoot":  "projects",
+    "projects":  {
+                     "studio":  {
+                                    "projectType":  "application",
+                                    "schematics":  {
+                                                       "@schematics/angular:component":  {
+                                                                                             "style":  "scss"
+                                                                                         }
+                                                   },
+                                    "root":  "",
+                                    "sourceRoot":  "src",
+                                    "prefix":  "app",
+                                    "architect":  {
+                                                      "build":  {
+                                                                    "builder":  "@angular/build:application",
+                                                                    "options":  {
+                                                                                    "browser":  "src/main.ts",
+                                                                                    "tsConfig":  "tsconfig.app.json",
+                                                                                    "inlineStyleLanguage":  "scss",
+                                                                                    "assets":  [
+                                                                                                   {
+                                                                                                       "glob":  "**/*",
+                                                                                                       "input":  "public"
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "glob":  "pdf.worker.min.mjs",
+                                                                                                       "input":  "node_modules/pdfjs-dist/build",
+                                                                                                       "output":  "pdfjs"
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "glob":  "**/*",
+                                                                                                       "input":  "node_modules/pdfjs-dist/cmaps",
+                                                                                                       "output":  "pdfjs/cmaps"
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "glob":  "**/*",
+                                                                                                       "input":  "node_modules/pdfjs-dist/standard_fonts",
+                                                                                                       "output":  "pdfjs/standard_fonts"
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "glob":  "**/*",
+                                                                                                       "input":  "node_modules/pdfjs-dist/wasm",
+                                                                                                       "output":  "pdfjs/wasm"
+                                                                                                   },
+                                                                                                   {
+                                                                                                       "glob":  "**/*",
+                                                                                                       "input":  "node_modules/pdfjs-dist/iccs",
+                                                                                                       "output":  "pdfjs/iccs"
+                                                                                                   }
+                                                                                               ],
+                                                                                    "styles":  [
+                                                                                                   "src/styles.scss"
+                                                                                               ],
+                                                                                    "allowedCommonJsDependencies":  [
+                                                                                                                        "jszip",
+                                                                                                                        "pako",
+                                                                                                                        "@pdf-lib/standard-fonts",
+                                                                                                                        "@pdf-lib/upng"
+                                                                                                                    ]
+                                                                                },
+                                                                    "configurations":  {
+                                                                                           "production":  {
+                                                                                                              "budgets":  [
+                                                                                                                              {
+                                                                                                                                  "type":  "initial",
+                                                                                                                                  "maximumWarning":  "500kB",
+                                                                                                                                  "maximumError":  "1MB"
+                                                                                                                              },
+                                                                                                                              {
+                                                                                                                                  "type":  "anyComponentStyle",
+                                                                                                                                  "maximumWarning":  "6kB",
+                                                                                                                                  "maximumError":  "12kB"
+                                                                                                                              }
+                                                                                                                          ],
+                                                                                                              "outputHashing":  "all",
+                                                                                                              "optimization":  {
+                                                                                                                                   "scripts":  true,
+                                                                                                                                   "styles":  {
+                                                                                                                                                  "minify":  true,
+                                                                                                                                                  "inlineCritical":  false
+                                                                                                                                              },
+                                                                                                                                   "fonts":  true
+                                                                                                                               }
+                                                                                                          },
+                                                                                           "development":  {
+                                                                                                               "optimization":  false,
+                                                                                                               "extractLicenses":  false,
+                                                                                                               "sourceMap":  true
+                                                                                                           }
+                                                                                       },
+                                                                    "defaultConfiguration":  "production"
+                                                                },
+                                                      "serve":  {
+                                                                    "builder":  "@angular/build:dev-server",
+                                                                    "configurations":  {
+                                                                                           "production":  {
+                                                                                                              "buildTarget":  "studio:build:production"
+                                                                                                          },
+                                                                                           "development":  {
+                                                                                                               "buildTarget":  "studio:build:development"
+                                                                                                           }
+                                                                                       },
+                                                                    "defaultConfiguration":  "development",
+                                                                    "options":  {
+                                                                                    "proxyConfig":  "proxy.conf.json"
+                                                                                }
+                                                                },
+                                                      "test":  {
+                                                                   "builder":  "@angular/build:unit-test"
+                                                               }
+                                                  }
+                                }
+                 }
+}

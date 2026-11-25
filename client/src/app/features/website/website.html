@@ -1,0 +1,424 @@
+@if (!site()) {
+  <div class="page">
+    <header class="page-head">
+      <h1>Website Editor</h1>
+      <button type="button" class="btn primary" (click)="creating.set(true)">New website</button>
+    </header>
+    @if (sites.loaded() && !sites.items().length) {
+      <p class="empty">No websites yet.</p>
+    }
+    <div class="tile-grid">
+      @for (item of sites.items(); track item.id) {
+        <article class="tile" [style.border-top-color]="item.themeColor">
+          <button type="button" class="tile-open" (click)="openSite(item.id)">
+            <strong>🌐 {{ item.name }}</strong>
+          </button>
+          <div class="row end">
+            <button type="button" class="btn small danger" (click)="removeSite(item)">
+              Delete
+            </button>
+          </div>
+        </article>
+      }
+    </div>
+  </div>
+} @else {
+  <div class="editor">
+    <div class="toolbar">
+      <button type="button" class="btn" (click)="closeSite()">← Websites</button>
+      <strong class="grow truncate">{{ site()!.name }} — {{ page()?.title }}</strong>
+      @for (option of ['desktop', 'tablet', 'mobile']; track option) {
+        <button
+          type="button"
+          class="btn small"
+          [attr.aria-pressed]="device() === option"
+          (click)="device.set($any(option))"
+        >
+          {{ option }}
+        </button>
+      }
+      <span class="sep"></span>
+      <button
+        type="button"
+        class="btn"
+        aria-label="Undo"
+        [disabled]="!history.canUndo()"
+        (click)="undo()"
+      >
+        ↶
+      </button>
+      <button
+        type="button"
+        class="btn"
+        aria-label="Redo"
+        [disabled]="!history.canRedo()"
+        (click)="redo()"
+      >
+        ↷
+      </button>
+      <button type="button" class="btn" (click)="preview()">Preview</button>
+      <button
+        type="button"
+        class="btn primary"
+        [disabled]="busy() || !page()"
+        (click)="exportSite()"
+      >
+        {{ busy() ? 'Exporting…' : 'Export website' }}
+      </button>
+    </div>
+
+    <div class="workbench">
+      <aside class="panel" aria-label="Pages and blocks">
+        <h3>Pages</h3>
+        <div cdkDropList (cdkDropListDropped)="dropPage($event)">
+          @for (item of pages.items(); track item.id; let i = $index) {
+            <div
+              class="list-item"
+              cdkDrag
+              [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+              [class.selected]="item.id === pageId()"
+            >
+              <span aria-hidden="true">⠿</span>
+              <button
+                type="button"
+                class="pick"
+                title="Double-click to rename"
+                (click)="openPage(item.id)"
+                (dblclick)="renamePage(item)"
+              >
+                {{ item.title }}{{ i === 0 ? ' (home)' : '' }}
+              </button>
+            </div>
+          }
+        </div>
+        <small class="muted">Drag pages to reorder. The first one is the home page.</small>
+        <div class="palette">
+          <button type="button" class="btn" (click)="addPage(false)">+ Page</button>
+          <button type="button" class="btn" (click)="addPage(true)">Copy page</button>
+          <button type="button" class="btn" (click)="movePage(-1)">Page ↑</button>
+          <button type="button" class="btn" (click)="movePage(1)">Page ↓</button>
+        </div>
+
+        <details class="group" open>
+          <summary>Add block</summary>
+          @if (target(); as into) {
+            <p class="chip">
+              Adding into column {{ into.column + 1 }}
+              <button
+                type="button"
+                class="btn ghost icon"
+                aria-label="Cancel"
+                (click)="target.set(null)"
+              >
+                ✕
+              </button>
+            </p>
+          }
+          @for (group of groups; track group.name) {
+            <small class="muted">{{ group.name }}</small>
+            <div class="palette">
+              @for (block of group.blocks; track block.kind) {
+                <button
+                  type="button"
+                  class="btn"
+                  draggable="true"
+                  (dragstart)="paletteDrag($event, block.kind)"
+                  (click)="add(block.kind)"
+                >
+                  <span aria-hidden="true">{{ block.icon }}</span> {{ block.label }}
+                </button>
+              }
+            </div>
+          }
+        </details>
+
+        <h3>Page structure</h3>
+        <div cdkDropList (cdkDropListDropped)="drop($event)">
+          @for (block of history.value; track block.id) {
+            <div
+              class="list-item"
+              cdkDrag
+              [class.selected]="block.id === selectedId()"
+              [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+            >
+              <span aria-hidden="true">⠿</span>
+              <button type="button" class="pick" (click)="selectedId.set(block.id)">
+                {{ label(block.kind) }}
+              </button>
+            </div>
+            @for (column of block.columns ?? []; track $index) {
+              @for (child of column; track child.id) {
+                <div class="list-item nested" [class.selected]="child.id === selectedId()">
+                  <button type="button" class="pick" (click)="selectedId.set(child.id)">
+                    ↳ {{ label(child.kind) }}
+                  </button>
+                </div>
+              }
+            }
+          }
+        </div>
+      </aside>
+
+      <div class="stage canvas-stage">
+        <iframe
+          #frame
+          class="canvas-frame"
+          title="Page canvas"
+          sandbox="allow-same-origin"
+          [style.width]="widths[device()]"
+          [srcdoc]="shellHtml"
+          (load)="frameLoaded()"
+        ></iframe>
+      </div>
+
+      <aside class="panel" aria-label="Settings">
+        @if (selected(); as block) {
+          <h3>{{ def()?.label }}</h3>
+          <div class="row wrap">
+            <button type="button" class="btn small" (click)="shift(-1)">↑ Up</button>
+            <button type="button" class="btn small" (click)="shift(1)">↓ Down</button>
+            <button type="button" class="btn small" (click)="duplicate()">Duplicate</button>
+            <button type="button" class="btn small danger" (click)="remove()">Delete</button>
+          </div>
+          @if (block.columns) {
+            @if (block.kind === 'columns') {
+              <label class="field"
+                >Number of columns
+                <select (change)="columnCount(+$any($event.target).value)">
+                  @for (count of [1, 2, 3, 4]; track count) {
+                    <option [value]="count" [selected]="block.columns.length === count">
+                      {{ count }}
+                    </option>
+                  }
+                </select>
+              </label>
+              <div class="row wrap">
+                @for (column of block.columns; track $index) {
+                  <label class="field"
+                    >Column {{ $index + 1 }} colour
+                    <input
+                      type="color"
+                      [value]="columnColor($index) || '#ffffff'"
+                      (input)="setColumnColor($index, $any($event.target).value)"
+                    />
+                  </label>
+                  @if (columnColor($index)) {
+                    <button type="button" class="btn small" (click)="setColumnColor($index, '')">
+                      Clear {{ $index + 1 }}
+                    </button>
+                  }
+                }
+              </div>
+            }
+            <div class="row wrap">
+              @for (column of block.columns; track $index) {
+                <button
+                  type="button"
+                  class="btn small"
+                  [attr.aria-pressed]="target()?.column === $index"
+                  (click)="target.set({ id: block.id, column: $index })"
+                >
+                  + Into {{ block.kind === 'tabs' ? 'tab' : 'column' }} {{ $index + 1 }}
+                </button>
+              }
+            </div>
+          }
+          @for (current of [block.id]; track current) {
+            <app-field-editor
+              [fields]="def()!.fields"
+              [value]="block.props"
+              [pages]="pageLinks()"
+              (changed)="setProps($event)"
+            />
+            <details class="group">
+              <summary>Design</summary>
+              <div class="row wrap">
+                <label class="field"
+                  >Background
+                  <input
+                    type="color"
+                    [value]="styleValue('background') || '#ffffff'"
+                    (input)="setStyle({ background: $any($event.target).value })"
+                /></label>
+                <label class="field"
+                  >Text
+                  <input
+                    type="color"
+                    [value]="styleValue('color') || '#000000'"
+                    (input)="setStyle({ color: $any($event.target).value })"
+                /></label>
+                <label class="field"
+                  >Border
+                  <input
+                    type="color"
+                    [value]="styleValue('borderColor') || '#cbd5e1'"
+                    (input)="setStyle({ borderColor: $any($event.target).value })"
+                /></label>
+              </div>
+              <div class="row wrap">
+                <button
+                  type="button"
+                  class="btn small"
+                  (click)="setStyle({ background: '', color: '', borderColor: '' })"
+                >
+                  Reset colours
+                </button>
+                <button type="button" class="btn small" (click)="backgroundImage()">
+                  Background picture
+                </button>
+                @if (block.style.backgroundImage) {
+                  <button
+                    type="button"
+                    class="btn small"
+                    (click)="setStyle({ backgroundImage: '' })"
+                  >
+                    Remove picture
+                  </button>
+                }
+              </div>
+              <app-field-editor
+                [fields]="styleFields"
+                [value]="$any(block.style)"
+                (changed)="setStyle($event)"
+              />
+              @for (item of styleNumbers; track item.key) {
+                <label class="field"
+                  >{{ item.label }} (px)
+                  <input
+                    type="number"
+                    placeholder="Default"
+                    [min]="item.min"
+                    [max]="item.max"
+                    [value]="styleValue(item.key)"
+                    (change)="styleNumber(item.key, $any($event.target), item.min, item.max)"
+                  />
+                </label>
+              }
+            </details>
+          }
+        } @else {
+          <h3>Website design</h3>
+          <div class="row wrap">
+            <span class="grow truncate"
+              >Browser icon:
+              {{ site()!.faviconMediaId ? faviconName(site()!.faviconMediaId!) : 'none' }}</span
+            >
+            <button type="button" class="btn small" (click)="chooseFavicon()">Choose icon</button>
+            @if (site()!.faviconMediaId) {
+              <button type="button" class="btn small" (click)="theme({ faviconMediaId: null })">
+                Remove icon
+              </button>
+            }
+          </div>
+          <label class="field"
+            >Website name
+            <input
+              maxlength="200"
+              [value]="site()!.name"
+              (change)="theme({ name: $any($event.target).value || 'My website' })"
+          /></label>
+          <div class="row wrap">
+            <label class="field"
+              >Accent
+              <input
+                type="color"
+                [value]="site()!.themeColor"
+                (input)="theme({ themeColor: $any($event.target).value })"
+            /></label>
+            <label class="field"
+              >Text
+              <input
+                type="color"
+                [value]="site()!.textColor"
+                (input)="theme({ textColor: $any($event.target).value })"
+            /></label>
+            <label class="field"
+              >Page
+              <input
+                type="color"
+                [value]="site()!.backgroundColor"
+                (input)="theme({ backgroundColor: $any($event.target).value })"
+            /></label>
+          </div>
+          <label class="field"
+            >Font
+            <select (change)="theme({ fontFamily: $any($event.target).value })">
+              @for (font of siteFonts; track font[0]) {
+                <option [value]="font[0]" [selected]="site()!.fontFamily === font[0]">
+                  {{ font[1] }}
+                </option>
+              }
+            </select>
+          </label>
+          @if (page(); as current) {
+            <h3>This page</h3>
+            <label class="field"
+              >Title
+              <input
+                maxlength="200"
+                [value]="current.title"
+                (input)="setPage({ title: $any($event.target).value })"
+            /></label>
+            <label class="field"
+              >Address name
+              <input
+                maxlength="60"
+                [value]="current.slug"
+                (change)="
+                  setSlug($any($event.target).value); $any($event.target).value = page()!.slug
+                "
+            /></label>
+            <label class="field"
+              >Search description
+              <textarea
+                rows="3"
+                maxlength="500"
+                [value]="current.seoDescription"
+                (input)="setPage({ seoDescription: $any($event.target).value })"
+              ></textarea>
+            </label>
+            <button
+              type="button"
+              class="btn danger"
+              [disabled]="pages.items().length < 2"
+              (click)="removePage()"
+            >
+              Delete page
+            </button>
+          }
+          <p class="muted">Click anything on the canvas to edit it.</p>
+        }
+      </aside>
+    </div>
+  </div>
+}
+
+@if (creating()) {
+  <app-modal heading="New website" [wide]="true" (closed)="creating.set(false)">
+    <form class="col" #form (submit)="createSite($event, template.value)">
+      <label class="field"
+        >Website name <input name="name" required autofocus maxlength="200"
+      /></label>
+      <label class="field"
+        >Start from
+        <select #template>
+          @for (item of templates; track item.name) {
+            <option [value]="item.name">{{ item.name }} — {{ item.description }}</option>
+          }
+        </select>
+      </label>
+      <button type="submit" class="btn primary" [disabled]="busy()">Create website</button>
+    </form>
+  </app-modal>
+}
+
+@if (previewHtml(); as html) {
+  <app-modal heading="Preview" [wide]="true" (closed)="previewHtml.set(null)">
+    <iframe
+      class="preview-frame"
+      title="Website preview"
+      sandbox=""
+      [srcdoc]="previewDocument()!"
+    ></iframe>
+  </app-modal>
+}

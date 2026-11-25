@@ -1,0 +1,518 @@
+@if (!movie()) {
+  <div class="page">
+    <header class="page-head">
+      <h1>{{ config.title }}</h1>
+      <button type="button" class="btn primary" (click)="create()">
+        {{ config.collection === 'movies' ? 'New movie' : 'New slideshow' }}
+      </button>
+    </header>
+    @if (store.loaded() && !store.items().length) {
+      <p class="empty">Nothing here yet.</p>
+    }
+    <div class="tile-grid">
+      @for (item of store.items(); track item.id) {
+        <article class="tile">
+          <button type="button" class="tile-open" (click)="open(item.id)">
+            <strong>🎞️ {{ item.title }}</strong>
+            <span class="muted">{{ item.clips.length }} scenes · {{ item.aspect }}</span>
+          </button>
+          <div class="row end">
+            <button type="button" class="btn small" (click)="rename(item)">Rename</button>
+            <button type="button" class="btn small danger" (click)="remove(item)">Delete</button>
+          </div>
+        </article>
+      }
+    </div>
+  </div>
+} @else {
+  <div class="editor">
+    <div class="toolbar">
+      <button type="button" class="btn" (click)="close()">← {{ config.title }}</button>
+      <button type="button" class="btn ghost grow truncate" (click)="rename(movie()!)">
+        <strong>{{ movie()!.title }}</strong>
+      </button>
+      <button
+        type="button"
+        class="btn"
+        aria-label="Undo"
+        [disabled]="!history.canUndo()"
+        (click)="undo()"
+      >
+        ↶
+      </button>
+      <button
+        type="button"
+        class="btn"
+        aria-label="Redo"
+        [disabled]="!history.canRedo()"
+        (click)="redo()"
+      >
+        ↷
+      </button>
+      <button type="button" class="btn" (click)="exportProject()">Project file</button>
+      <button type="button" class="btn" [disabled]="!!exportState()" (click)="export('webm')">
+        Export WebM
+      </button>
+      <button
+        type="button"
+        class="btn primary"
+        [disabled]="!!exportState()"
+        (click)="export('mp4')"
+      >
+        Export MP4
+      </button>
+    </div>
+    <div class="workbench">
+      <aside class="panel" aria-label="Movie settings">
+        <button type="button" class="btn primary" (click)="addScene()">+ Scene</button>
+        <button type="button" class="btn" [disabled]="!scene()" (click)="addMedia()">
+          + Picture or video
+        </button>
+        <button type="button" class="btn" [disabled]="!scene()" (click)="addBubble()">
+          + Speech bubble
+        </button>
+        @if (scene(); as current) {
+          <h3>In this scene</h3>
+          @for (item of current.objects; track item.id) {
+            <div class="list-item" [class.selected]="item.id === objectId()">
+              <button
+                type="button"
+                class="pick"
+                (click)="objectId.set(item.id); bubbleId.set(null)"
+              >
+                {{ item.kind === 'video' ? '🎬' : '🖼' }} {{ mediaName(item.mediaId) }}
+              </button>
+            </div>
+          }
+          @for (item of current.bubbles; track item.id) {
+            <div class="list-item" [class.selected]="item.id === bubbleId()">
+              <button
+                type="button"
+                class="pick"
+                (click)="bubbleId.set(item.id); objectId.set(null)"
+              >
+                💬 {{ item.text }}
+              </button>
+            </div>
+          }
+        }
+        <details class="group">
+          <summary>Movie settings</summary>
+          <label class="field"
+            >Shape
+            <select (change)="set({ aspect: $any($event.target).value })">
+              @for (aspect of aspects; track aspect) {
+                <option [value]="aspect" [selected]="data().aspect === aspect">{{ aspect }}</option>
+              }
+            </select>
+          </label>
+          <label class="field"
+            >Background
+            <input
+              type="color"
+              [value]="data().background"
+              (input)="set({ background: $any($event.target).value }, 'bg')"
+          /></label>
+          @if (data().musicMediaId; as musicId) {
+            <span class="truncate">🎵 {{ mediaName(musicId) }}</span>
+            <app-slider
+              label="Music volume"
+              unit="%"
+              [value]="round(data().musicVolume * 100)"
+              (changed)="set({ musicVolume: $event / 100 }, 'volume')"
+            />
+            <button type="button" class="btn small" (click)="set({ musicMediaId: null })">
+              Remove music
+            </button>
+          } @else {
+            <button type="button" class="btn small" (click)="chooseMusic()">Add music</button>
+          }
+          @for (which of bandNames; track which) {
+            <app-band-panel
+              [label]="which === 'header' ? 'Title bar on top' : 'Bar at bottom'"
+              [band]="bandOf(data()[which])"
+              (changed)="setBand(which, $event)"
+            />
+          }
+        </details>
+      </aside>
+
+      <div class="stage">
+        @if (exportState(); as state) {
+          <div class="card row" role="status">
+            <span>{{ state.label }} ({{ round(state.progress * 100) }}%)</span>
+            <progress class="grow" max="1" [value]="state.progress"></progress>
+            <button type="button" class="btn small" (click)="cancelExport()">Cancel</button>
+          </div>
+        }
+        @if (lastExport(); as id) {
+          <div class="card row">
+            <span class="grow">✅ Export complete.</span
+            ><a class="btn small" [href]="downloadUrl(id)" download>Download</a>
+          </div>
+        }
+        <canvas
+          #canvas
+          class="preview"
+          aria-label="Movie preview"
+          (pointerdown)="pointerDown($event)"
+        ></canvas>
+        <div class="row transport">
+          <button
+            type="button"
+            class="btn"
+            aria-label="Go to start"
+            (click)="engine.pause(); engine.seek(0)"
+          >
+            ⏮
+          </button>
+          <button
+            type="button"
+            class="btn primary"
+            [disabled]="!data().clips.length"
+            (click)="engine.playing() ? engine.pause() : engine.play()"
+          >
+            {{ engine.playing() ? '⏸ Pause' : '▶ Play' }}
+          </button>
+          <input
+            class="grow"
+            type="range"
+            aria-label="Playhead"
+            min="0"
+            step="0.05"
+            [max]="total() || 1"
+            [value]="engine.time()"
+            (input)="engine.pause(); engine.seek(+$any($event.target).value)"
+          />
+          <span>{{ time(engine.time()) }} / {{ time(total()) }}</span>
+        </div>
+        <div
+          class="scenes"
+          cdkDropList
+          cdkDropListOrientation="horizontal"
+          (cdkDropListDropped)="dropScene($event)"
+        >
+          @for (item of data().clips; track item.id; let i = $index) {
+            <button
+              type="button"
+              class="scene"
+              cdkDrag
+              [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+              [class.selected]="item.id === sceneId()"
+              (click)="jump(item, i)"
+            >
+              @if (item.objects[0]; as first) {
+                @if (first.kind === 'video') {
+                  <video [src]="url(first.mediaId) + '#t=0.1'" preload="metadata" muted></video>
+                } @else {
+                  <img [src]="url(first.mediaId)" alt="" />
+                }
+              }
+              <span>{{ i + 1 }} · {{ item.duration.toFixed(1) }}s</span>
+            </button>
+          }
+        </div>
+      </div>
+
+      <aside class="panel" aria-label="Selection settings">
+        @if (object(); as item) {
+          <h3 class="truncate">{{ mediaName(item.mediaId) }}</h3>
+          <label class="field"
+            >Size on screen
+            <select (change)="patchObject({ fit: $any($event.target).value })">
+              <option value="free" [selected]="item.fit === 'free'">Place freely</option>
+              <option value="contain" [selected]="item.fit === 'contain'">Fit whole frame</option>
+              <option value="cover" [selected]="item.fit === 'cover'">Fill frame (crops)</option>
+            </select>
+          </label>
+          @if (item.fit === 'free') {
+            <app-slider
+              label="Width"
+              unit="%"
+              [min]="5"
+              [max]="150"
+              [value]="round(item.width * 100)"
+              (changed)="patchObject({ width: $event / 100 })"
+            />
+            <app-slider
+              label="Horizontal"
+              unit="%"
+              [value]="round(item.x * 100)"
+              (changed)="patchObject({ x: $event / 100 })"
+            />
+            <app-slider
+              label="Vertical"
+              unit="%"
+              [value]="round(item.y * 100)"
+              (changed)="patchObject({ y: $event / 100 })"
+            />
+          }
+          <label class="field"
+            >Animation
+            <select (change)="patchObject({ animation: $any($event.target).value })">
+              @for (name of animations; track name) {
+                <option [value]="name" [selected]="item.animation === name">{{ name }}</option>
+              }
+            </select>
+          </label>
+          @if (item.animation !== 'none') {
+            <app-slider
+              label="Strength"
+              unit="%"
+              [value]="item.intensity"
+              (changed)="patchObject({ intensity: $event })"
+            />
+          }
+          <app-slider
+            label="Appears at"
+            unit="s"
+            [step]="0.1"
+            [max]="scene()!.duration"
+            [value]="item.startSec"
+            (changed)="patchObject({ startSec: $event < item.endSec ? $event : item.startSec })"
+          />
+          <app-slider
+            label="Leaves at"
+            unit="s"
+            [step]="0.1"
+            [max]="scene()!.duration"
+            [value]="item.endSec"
+            (changed)="patchObject({ endSec: $event > item.startSec ? $event : item.endSec })"
+          />
+          @if (item.kind === 'video') {
+            <app-slider
+              label="Start video from"
+              unit="s"
+              [step]="0.1"
+              [max]="3600"
+              [value]="item.trimStart"
+              (changed)="patchObject({ trimStart: $event })"
+            />
+            <label class="check"
+              ><input
+                type="checkbox"
+                [checked]="item.muted"
+                (change)="patchObject({ muted: $any($event.target).checked })"
+              />
+              Mute its sound</label
+            >
+          }
+          <div class="row wrap">
+            <button type="button" class="btn small" (click)="layerObject(1)">Bring forward</button>
+            <button type="button" class="btn small" (click)="layerObject(-1)">Send back</button>
+            <button type="button" class="btn small" (click)="replaceMedia()">Replace with…</button>
+            @if (item.kind === 'image') {
+              <button type="button" class="btn small" (click)="editImage(item)">Edit image</button>
+            }
+            <button type="button" class="btn small danger" (click)="removeObject()">Remove</button>
+          </div>
+        } @else if (bubble(); as item) {
+          <h3>Speech bubble</h3>
+          <textarea
+            rows="3"
+            aria-label="Bubble text"
+            [value]="item.text"
+            (input)="patchBubble({ text: $any($event.target).value })"
+          ></textarea>
+          <label class="field"
+            >Spoken by
+            <select (change)="patchBubble({ objectId: $any($event.target).value || null })">
+              <option value="" [selected]="!item.objectId">Place freely</option>
+              @for (speaker of scene()!.objects; track speaker.id) {
+                <option [value]="speaker.id" [selected]="item.objectId === speaker.id">
+                  {{ mediaName(speaker.mediaId) }}
+                </option>
+              }
+            </select>
+          </label>
+          @if (!item.objectId) {
+            <app-slider
+              label="Horizontal"
+              unit="%"
+              [value]="round(item.x * 100)"
+              (changed)="patchBubble({ x: $event / 100 })"
+            />
+            <app-slider
+              label="Vertical"
+              unit="%"
+              [value]="round(item.y * 100)"
+              (changed)="patchBubble({ y: $event / 100 })"
+            />
+          }
+          <app-slider
+            label="Appears at"
+            unit="s"
+            [step]="0.1"
+            [max]="scene()!.duration"
+            [value]="item.startSec"
+            (changed)="patchBubble({ startSec: $event < item.endSec ? $event : item.startSec })"
+          />
+          <app-slider
+            label="Leaves at"
+            unit="s"
+            [step]="0.1"
+            [max]="scene()!.duration"
+            [value]="item.endSec"
+            (changed)="patchBubble({ endSec: $event > item.startSec ? $event : item.endSec })"
+          />
+          <app-slider
+            label="Text size"
+            unit="px"
+            [min]="14"
+            [max]="120"
+            [value]="item.fontSize"
+            (changed)="patchBubble({ fontSize: $event })"
+          />
+          <select
+            aria-label="Font"
+            (change)="patchBubble({ fontFamily: $any($event.target).value })"
+          >
+            @for (font of fonts; track font.label) {
+              <option [value]="font.value" [selected]="item.fontFamily === font.value">
+                {{ font.label }}
+              </option>
+            }
+          </select>
+          <label class="check"
+            ><input
+              type="checkbox"
+              [checked]="item.tail"
+              (change)="patchBubble({ tail: $any($event.target).checked })"
+            />
+            Speech tail</label
+          >
+          <div class="row">
+            <label class="field"
+              >Bubble
+              <input
+                type="color"
+                [value]="item.bubbleColor"
+                (input)="patchBubble({ bubbleColor: $any($event.target).value })"
+            /></label>
+            <label class="field"
+              >Text
+              <input
+                type="color"
+                [value]="item.textColor"
+                (input)="patchBubble({ textColor: $any($event.target).value })"
+            /></label>
+          </div>
+          <div class="row wrap">
+            <button type="button" class="btn small" (click)="pinBubble('top')">Pin to top</button>
+            <button type="button" class="btn small" (click)="pinBubble('bottom')">
+              Pin to bottom
+            </button>
+            <button type="button" class="btn small" (click)="duplicateBubble()">Duplicate</button>
+          </div>
+          <button type="button" class="btn danger" (click)="removeBubble()">Remove bubble</button>
+        } @else if (scene(); as current) {
+          <h3>Scene</h3>
+          <app-slider
+            label="Length"
+            unit="s"
+            [min]="0.5"
+            [max]="60"
+            [step]="0.5"
+            [value]="current.duration"
+            (changed)="duration($event)"
+          />
+          <label class="field"
+            >Entrance
+            <select (change)="patchScene({ transitionIn: $any($event.target).value })">
+              @for (name of transitions; track name) {
+                <option [value]="name" [selected]="current.transitionIn === name">
+                  {{ name }}
+                </option>
+              }
+            </select>
+          </label>
+          <label class="field"
+            >Exit
+            <select (change)="patchScene({ transitionOut: $any($event.target).value })">
+              @for (name of transitions; track name) {
+                <option [value]="name" [selected]="current.transitionOut === name">
+                  {{ name }}
+                </option>
+              }
+            </select>
+          </label>
+          <button type="button" class="btn" (click)="duplicateScene()">Duplicate scene</button>
+          <button type="button" class="btn danger" (click)="removeScene()">Delete scene</button>
+          <p class="muted">Click an object on the preview to edit it, and drag to move it.</p>
+        } @else {
+          <p class="muted">Add a scene to begin.</p>
+        }
+      </aside>
+    </div>
+  </div>
+}
+
+@if (editingImage(); as editing) {
+  <div class="embedded-editor">
+    <app-image-editor
+      [embedded]="editing.mediaId"
+      (exported)="imageEdited($event)"
+      (dismissed)="editingImage.set(null)"
+    />
+  </div>
+}
+
+@if (creating()) {
+  <app-modal heading="New slideshow" [wide]="true" (closed)="creating.set(false)">
+    <form class="col" (submit)="buildShow($event)">
+      <label class="field">Name <input name="title" required autofocus maxlength="200" /></label>
+      <div class="row wrap">
+        <label class="field"
+          >Seconds per picture <input name="seconds" type="number" min="1" max="60" value="4"
+        /></label>
+        <label class="field"
+          >Transition
+          <select name="transition">
+            @for (name of transitions; track name) {
+              <option [value]="name" [selected]="name === 'fade'">{{ name }}</option>
+            }
+          </select>
+        </label>
+        <label class="field"
+          >Shape
+          <select name="aspect">
+            @for (aspect of aspects; track aspect) {
+              <option [value]="aspect">{{ aspect }}</option>
+            }
+          </select>
+        </label>
+      </div>
+      <div class="row wrap">
+        <button type="button" class="btn" (click)="chooseSlides()">Choose files</button>
+        <select #folder aria-label="Add a whole folder" (change)="addFolder(folder)">
+          <option value="">Add a whole folder…</option>
+          <option value="root">Top level</option>
+          @for (item of library.folders(); track item.id) {
+            <option [value]="item.id">{{ item.name }}</option>
+          }
+        </select>
+      </div>
+      <div class="slide-list" cdkDropList (cdkDropListDropped)="dropSlide($event)">
+        @for (item of slideItems(); track $index; let i = $index) {
+          <div class="list-item" cdkDrag>
+            <span aria-hidden="true">⠿</span>
+            <span class="grow truncate">{{ i + 1 }}. {{ item.title }}</span>
+            <button
+              type="button"
+              class="btn ghost icon"
+              aria-label="Remove slide"
+              (click)="removeSlide(i)"
+            >
+              ✕
+            </button>
+          </div>
+        } @empty {
+          <p class="muted">No slides chosen yet.</p>
+        }
+      </div>
+      <button type="submit" class="btn primary" [disabled]="!slideItems().length">
+        Create slideshow
+      </button>
+    </form>
+  </app-modal>
+}

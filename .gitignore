@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.angular/
+coverage/
+
+# User data: database and uploaded files
+server/data/
+
+# Browser test output
+e2e/test-results/
+e2e/playwright-report/
+
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+.claude/settings.local.json

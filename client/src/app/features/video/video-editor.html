@@ -1,0 +1,597 @@
+@if (!opened()) {
+  <div class="page">
+    <header class="page-head">
+      <h1>Video Editor</h1>
+      <button type="button" class="btn" (click)="newProject()">New empty project</button>
+      <button type="button" class="btn primary" (click)="uploadVideo()">Upload video</button>
+    </header>
+    @if (saved().length) {
+      <h2>Continue editing</h2>
+      <div class="tile-grid">
+        @for (project of saved(); track project.id) {
+          <article class="tile">
+            <button type="button" class="tile-open" (click)="resume(project)">
+              <strong>🎬 {{ project.name }}</strong
+              ><span class="muted">{{ project.doc.clips?.length ?? 0 }} clips</span>
+              <span class="chip">{{
+                project.status === 'done' ? 'Done · edit again' : 'Draft · resume editing'
+              }}</span>
+            </button>
+            <div class="row end">
+              <button type="button" class="btn small danger" (click)="deleteProject(project)">
+                Delete
+              </button>
+            </div>
+          </article>
+        }
+      </div>
+    }
+    <h2>Videos in your library</h2>
+    @if (library.loaded() && !videos().length) {
+      <p class="empty">No videos yet. Upload one to start.</p>
+    }
+    <div class="media-grid">
+      @for (item of videos(); track item.id) {
+        <button type="button" class="media-card" (click)="openVideo(item)">
+          <span class="thumb"
+            ><video [src]="'/api/media/' + item.id + '/file#t=0.1'" preload="metadata" muted></video
+          ></span>
+          <span class="media-title">{{ item.title }}</span>
+        </button>
+      }
+    </div>
+  </div>
+} @else {
+  <div class="editor">
+    <div class="toolbar">
+      <button type="button" class="btn" (click)="close()">← Videos</button>
+      <button type="button" class="btn ghost grow truncate" title="Rename" (click)="rename()">
+        <strong>{{ opened()!.name }}</strong>
+      </button>
+      <button
+        type="button"
+        class="btn"
+        aria-label="Undo"
+        [disabled]="!history.canUndo()"
+        (click)="history.undo()"
+      >
+        ↶
+      </button>
+      <button
+        type="button"
+        class="btn"
+        aria-label="Redo"
+        [disabled]="!history.canRedo()"
+        (click)="history.redo()"
+      >
+        ↷
+      </button>
+      <button type="button" class="btn" [disabled]="!doc().clips.length" (click)="snapshot()">
+        📷 Save frame
+      </button>
+      <button
+        type="button"
+        class="btn primary"
+        [disabled]="exporting() || !doc().clips.length"
+        (click)="export()"
+      >
+        {{ exporting() ? 'Exporting…' : 'Export ' + doc().format.toUpperCase() }}
+      </button>
+    </div>
+
+    <div class="workbench">
+      <aside class="panel" aria-label="Project settings">
+        <button type="button" class="btn primary" [disabled]="adding()" (click)="addClips()">
+          {{ adding() ? 'Adding…' : '+ Add clips' }}
+        </button>
+        <div class="palette">
+          <button type="button" class="btn" [disabled]="!doc().clips.length" (click)="addOverlay()">
+            + Caption
+          </button>
+          <button
+            type="button"
+            class="btn"
+            [disabled]="!doc().clips.length"
+            (click)="addOverlay(false, 'top')"
+          >
+            Top text
+          </button>
+          <button
+            type="button"
+            class="btn"
+            [disabled]="!doc().clips.length"
+            (click)="addOverlay(false, 'bottom')"
+          >
+            Bottom text
+          </button>
+          <button
+            type="button"
+            class="btn"
+            [disabled]="!doc().clips.length"
+            (click)="addOverlay(true)"
+          >
+            + Sticker
+          </button>
+        </div>
+        <h3>Captions and stickers</h3>
+        @for (item of doc().overlays; track item.id) {
+          <div class="list-item" [class.selected]="item.id === overlayId()">
+            <button
+              type="button"
+              class="pick"
+              (click)="overlayId.set(item.id); player.seek(item.start)"
+            >
+              {{ item.text || '(empty)' }}
+            </button>
+          </div>
+        } @empty {
+          <p class="muted">None yet.</p>
+        }
+        <h3>Background music</h3>
+        @if (doc().music; as music) {
+          <span class="truncate">🎵 {{ name(music.mediaId) }}</span>
+          <app-slider
+            label="Music volume"
+            unit="%"
+            [max]="200"
+            [value]="round(music.volume * 100)"
+            (changed)="set({ music: { mediaId: music.mediaId, volume: $event / 100 } }, 'music')"
+          />
+          <button type="button" class="btn small" (click)="set({ music: null })">
+            Remove music
+          </button>
+        } @else {
+          <button type="button" class="btn small" (click)="chooseMusic()">Choose audio</button>
+        }
+        <h3>Output</h3>
+        <label class="field"
+          >Frame size
+          <select (change)="setSize(+$any($event.target).value)">
+            @for (size of frameSizes; track size.label; let i = $index) {
+              <option
+                [value]="i"
+                [selected]="size.width === doc().width && size.height === doc().height"
+              >
+                {{ size.label }}
+              </option>
+            }
+          </select>
+        </label>
+        <label class="field"
+          >Format
+          <select (change)="set({ format: $any($event.target).value })">
+            <option value="mp4" [selected]="doc().format === 'mp4'">MP4 video</option>
+            <option value="webm" [selected]="doc().format === 'webm'">WebM video</option>
+            <option value="gif" [selected]="doc().format === 'gif'">Animated GIF</option>
+            <option value="mp3" [selected]="doc().format === 'mp3'">MP3 audio only</option>
+          </select>
+        </label>
+        <label class="field"
+          >Quality
+          <select (change)="set({ quality: $any($event.target).value })">
+            @for (level of ['low', 'medium', 'high']; track level) {
+              <option [value]="level" [selected]="doc().quality === level">{{ level }}</option>
+            }
+          </select>
+        </label>
+        <label class="field"
+          >Frames per second
+          <select (change)="set({ fps: +$any($event.target).value })">
+            @for (rate of [15, 24, 30, 60]; track rate) {
+              <option [value]="rate" [selected]="doc().fps === rate">{{ rate }}</option>
+            }
+          </select>
+        </label>
+        <app-slider
+          label="Fade in"
+          unit="s"
+          [max]="5"
+          [step]="0.1"
+          [value]="doc().fadeIn"
+          (changed)="set({ fadeIn: $event }, 'fadeIn')"
+        />
+        <app-slider
+          label="Fade out"
+          unit="s"
+          [max]="5"
+          [step]="0.1"
+          [value]="doc().fadeOut"
+          (changed)="set({ fadeOut: $event }, 'fadeOut')"
+        />
+      </aside>
+
+      <div class="stage">
+        @if (job(); as current) {
+          <div class="card job" role="status">
+            @switch (current.status) {
+              @case ('done') {
+                <span class="grow">✅ Export complete.</span>
+                <a class="btn small" [href]="resultUrl(current.mediaId!)" download>Download</a>
+              }
+              @case ('error') {
+                <span class="grow form-error">{{ current.error }}</span>
+              }
+              @case ('cancelled') {
+                <span class="grow">Export cancelled.</span>
+              }
+              @default {
+                <span>{{
+                  current.status === 'queued' ? 'Waiting…' : round(current.progress * 100) + '%'
+                }}</span>
+                <progress class="grow" max="1" [value]="current.progress"></progress>
+                <button type="button" class="btn small" (click)="cancelExport()">Cancel</button>
+              }
+            }
+            @if (!exporting()) {
+              <button
+                type="button"
+                class="btn ghost icon"
+                aria-label="Dismiss"
+                (click)="job.set(null)"
+              >
+                ✕
+              </button>
+            }
+          </div>
+        }
+        <canvas
+          #canvas
+          class="preview"
+          aria-label="Video preview"
+          [width]="previewSize().width"
+          [height]="previewSize().height"
+          (click)="player.toggle()"
+        ></canvas>
+        <div class="transport">
+          <button type="button" class="btn" aria-label="Go to start" (click)="player.seek(0)">
+            ⏮
+          </button>
+          <button
+            type="button"
+            class="btn primary"
+            [disabled]="!doc().clips.length"
+            (click)="player.toggle()"
+          >
+            {{ player.playing() ? '⏸ Pause' : '▶ Play' }}
+          </button>
+          <input
+            class="grow"
+            type="range"
+            aria-label="Playhead"
+            min="0"
+            step="0.01"
+            [max]="total() || 1"
+            [value]="player.time()"
+            (input)="player.pause(); player.seek(+$any($event.target).value)"
+          />
+          <span class="clock">{{ time(player.time()) }} / {{ time(total()) }}</span>
+        </div>
+        <div
+          class="timeline"
+          cdkDropList
+          cdkDropListOrientation="horizontal"
+          (cdkDropListDropped)="dropClip($event)"
+        >
+          @for (item of doc().clips; track item.id; let i = $index) {
+            <button
+              type="button"
+              class="clip"
+              cdkDrag
+              [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+              [class.selected]="item.id === clipId()"
+              [style.flex-grow]="length(item)"
+              (click)="selectClip(item, i)"
+            >
+              @if (item.kind === 'video') {
+                <video [src]="thumbUrl(item)" preload="metadata" muted></video>
+              } @else {
+                <img [src]="thumbUrl(item)" alt="" />
+              }
+              <span>{{ name(item.mediaId) }} · {{ time(length(item)) }}</span>
+            </button>
+          } @empty {
+            <p class="empty">Add clips to build your video.</p>
+          }
+        </div>
+        <div class="row wrap">
+          <button
+            type="button"
+            class="btn small"
+            [disabled]="!doc().clips.length"
+            (click)="split()"
+          >
+            ✂ Split at playhead (S)
+          </button>
+          <button type="button" class="btn small" [disabled]="!clip()" (click)="trimHere('start')">
+            Set start here
+          </button>
+          <button type="button" class="btn small" [disabled]="!clip()" (click)="trimHere('end')">
+            Set end here
+          </button>
+          <button type="button" class="btn small" [disabled]="!clip()" (click)="shiftClip(-1)">
+            ← Move
+          </button>
+          <button type="button" class="btn small" [disabled]="!clip()" (click)="shiftClip(1)">
+            Move →
+          </button>
+          <button type="button" class="btn small" [disabled]="!clip()" (click)="duplicateClip()">
+            Duplicate
+          </button>
+          <button
+            type="button"
+            class="btn small danger"
+            [disabled]="!clip()"
+            (click)="removeClip()"
+          >
+            Delete clip
+          </button>
+        </div>
+        <small class="muted"
+          >The preview is close to the final result; effects are rendered precisely when you
+          export.</small
+        >
+      </div>
+
+      <aside class="panel" aria-label="Selection settings">
+        @if (overlay(); as item) {
+          <div class="row">
+            <h3 class="grow">Caption</h3>
+            <button type="button" class="btn small" (click)="overlayId.set(null)">Done</button>
+          </div>
+          <textarea
+            rows="3"
+            aria-label="Caption text"
+            [value]="item.text"
+            (input)="editOverlay({ text: $any($event.target).value })"
+          ></textarea>
+          <app-slider
+            label="Shows from"
+            unit="s"
+            [max]="total()"
+            [step]="0.1"
+            [value]="item.start"
+            (changed)="editOverlay({ start: $event })"
+          />
+          <app-slider
+            label="Hides at"
+            unit="s"
+            [max]="total()"
+            [step]="0.1"
+            [value]="item.end"
+            (changed)="editOverlay({ end: $event })"
+          />
+          <app-slider
+            label="Horizontal"
+            unit="%"
+            [value]="round(item.x * 100)"
+            (changed)="editOverlay({ x: $event / 100 })"
+          />
+          <app-slider
+            label="Vertical"
+            unit="%"
+            [value]="round(item.y * 100)"
+            (changed)="editOverlay({ y: $event / 100 })"
+          />
+          <app-slider
+            label="Size"
+            unit="%"
+            [min]="2"
+            [max]="40"
+            [value]="round(item.size * 100)"
+            (changed)="editOverlay({ size: $event / 100 })"
+          />
+          <select
+            aria-label="Font"
+            (change)="editOverlay({ fontFamily: $any($event.target).value })"
+          >
+            @for (font of fonts; track font.label) {
+              <option [value]="font.value" [selected]="item.fontFamily === font.value">
+                {{ font.label }}
+              </option>
+            }
+          </select>
+          <label class="field"
+            >Text colour
+            <input
+              type="color"
+              [value]="item.color"
+              (input)="editOverlay({ color: $any($event.target).value })"
+          /></label>
+          <label class="check"
+            ><input
+              type="checkbox"
+              [checked]="!!item.outline"
+              (change)="editOverlay({ outline: $any($event.target).checked ? '#000000' : '' })"
+            />
+            Outline</label
+          >
+          <label class="check"
+            ><input
+              type="checkbox"
+              [checked]="!!item.background"
+              (change)="editOverlay({ background: $any($event.target).checked ? '#111827' : '' })"
+            />
+            Background box</label
+          >
+          @if (item.background) {
+            <input
+              type="color"
+              aria-label="Background colour"
+              [value]="item.background"
+              (input)="editOverlay({ background: $any($event.target).value })"
+            />
+          }
+          <button type="button" class="btn danger" (click)="removeOverlay()">Delete caption</button>
+        } @else if (clip(); as item) {
+          <h3 class="truncate">{{ name(item.mediaId) }}</h3>
+          @if (item.kind === 'video') {
+            <app-slider
+              label="Trim start"
+              unit="s"
+              [max]="item.sourceDuration"
+              [step]="0.01"
+              [value]="item.start"
+              (changed)="setTrim('start', $event)"
+            />
+            <app-slider
+              label="Trim end"
+              unit="s"
+              [max]="item.sourceDuration"
+              [step]="0.01"
+              [value]="item.end"
+              (changed)="setTrim('end', $event)"
+            />
+            <label class="field"
+              >Speed
+              <select (change)="editClip({ speed: +$any($event.target).value })">
+                @for (speed of speeds; track speed) {
+                  <option [value]="speed" [selected]="item.speed === speed">{{ speed }}×</option>
+                }
+              </select>
+            </label>
+            <app-slider
+              label="Volume"
+              unit="%"
+              [max]="200"
+              [value]="round(item.volume * 100)"
+              (changed)="editClip({ volume: $event / 100 })"
+            />
+            <label class="check"
+              ><input
+                type="checkbox"
+                [checked]="item.muted"
+                (change)="editClip({ muted: $any($event.target).checked })"
+              />
+              Mute this clip</label
+            >
+          } @else {
+            <app-slider
+              label="Show for"
+              unit="s"
+              [min]="0.5"
+              [max]="60"
+              [step]="0.5"
+              [value]="item.end"
+              (changed)="setTrim('end', $event)"
+            />
+          }
+          <details class="group" open>
+            <summary>Rotate and flip</summary>
+            <div class="palette">
+              <button
+                type="button"
+                class="btn"
+                (click)="editClip({ rotate: $any((item.rotate + 90) % 360) })"
+              >
+                ⟳ Rotate ({{ item.rotate }}°)
+              </button>
+              <button
+                type="button"
+                class="btn"
+                [attr.aria-pressed]="item.flipH"
+                (click)="editClip({ flipH: !item.flipH })"
+              >
+                Flip H
+              </button>
+              <button
+                type="button"
+                class="btn"
+                [attr.aria-pressed]="item.flipV"
+                (click)="editClip({ flipV: !item.flipV })"
+              >
+                Flip V
+              </button>
+            </div>
+          </details>
+          <details class="group">
+            <summary>Crop edges</summary>
+            @for (side of sides; track side) {
+              <app-slider
+                [label]="'From ' + side"
+                unit="%"
+                [max]="90"
+                [value]="item.cut[side]"
+                (changed)="setCut(side, $event)"
+              />
+            }
+          </details>
+          <details class="group">
+            <summary>Picture adjustments</summary>
+            <app-slider
+              label="Brightness"
+              [min]="-50"
+              [max]="50"
+              [value]="round(item.brightness * 100)"
+              (changed)="editClip({ brightness: $event / 100 })"
+            />
+            <app-slider
+              label="Contrast"
+              unit="%"
+              [max]="200"
+              [value]="round(item.contrast * 100)"
+              (changed)="editClip({ contrast: $event / 100 })"
+            />
+            <app-slider
+              label="Saturation"
+              unit="%"
+              [max]="300"
+              [value]="round(item.saturation * 100)"
+              (changed)="editClip({ saturation: $event / 100 })"
+            />
+            <app-slider
+              label="Blur"
+              [max]="20"
+              [value]="item.blur"
+              (changed)="editClip({ blur: $event })"
+            />
+            <label class="check"
+              ><input
+                type="checkbox"
+                [checked]="item.grayscale"
+                (change)="editClip({ grayscale: $any($event.target).checked })"
+              />
+              Black and white</label
+            >
+            <app-slider
+              label="Hue"
+              unit="°"
+              [min]="-180"
+              [max]="180"
+              [value]="item.hue ?? 0"
+              (changed)="editClip({ hue: $event })"
+            />
+            <app-slider
+              label="Sepia"
+              unit="%"
+              [value]="round((item.sepia ?? 0) * 100)"
+              (changed)="editClip({ sepia: $event / 100 })"
+            />
+            <app-slider
+              label="Pixelate"
+              unit="px"
+              [max]="60"
+              [value]="item.pixelate ?? 0"
+              (changed)="editClip({ pixelate: $event })"
+            />
+            <app-slider
+              label="Vignette"
+              unit="%"
+              [value]="round((item.vignette ?? 0) * 100)"
+              (changed)="editClip({ vignette: $event / 100 })"
+            />
+            <label class="check"
+              ><input
+                type="checkbox"
+                [checked]="item.invert"
+                (change)="editClip({ invert: $any($event.target).checked })"
+              />
+              Invert colours</label
+            >
+          </details>
+        } @else {
+          <p class="muted">Select a clip or caption to change it.</p>
+        }
+      </aside>
+    </div>
+  </div>
+}

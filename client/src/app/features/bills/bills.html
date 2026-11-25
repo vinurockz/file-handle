@@ -1,0 +1,356 @@
+@if (open(); as bill) {
+  <header class="page-head no-print">
+    <button type="button" class="btn" (click)="close()">← All bills</button>
+    <h1>{{ bill.docType === 'bill' ? 'Bill' : 'Quotation' }} {{ bill.billNo }}</h1>
+    <button type="button" class="btn" (click)="exportPhoto(bill)">Export photo</button>
+    <button type="button" class="btn primary" (click)="print()">Print / Save PDF</button>
+  </header>
+  <div class="split">
+    <div class="col no-print">
+      <div class="row wrap">
+        <select aria-label="Document type" (change)="set({ docType: $any($event.target).value })">
+          <option value="bill" [selected]="bill.docType === 'bill'">Bill</option>
+          <option value="quotation" [selected]="bill.docType === 'quotation'">Quotation</option>
+        </select>
+        <input
+          aria-label="Number"
+          placeholder="Number"
+          size="8"
+          maxlength="40"
+          [value]="bill.billNo"
+          (input)="set({ billNo: $any($event.target).value })"
+        />
+        <input
+          aria-label="Date"
+          type="date"
+          [value]="bill.date"
+          (change)="set({ date: $any($event.target).value })"
+        />
+      </div>
+      <details class="group" open>
+        <summary>Company</summary>
+        @for (field of companyFields; track field[0]) {
+          <label class="field"
+            >{{ field[1] }}
+            @if (field[2]) {
+              <textarea
+                rows="2"
+                [attr.maxlength]="limits[field[0]]"
+                [value]="bill[field[0]]"
+                (input)="setText(field[0], $any($event.target).value)"
+              ></textarea>
+            } @else {
+              <input
+                [attr.maxlength]="limits[field[0]]"
+                [value]="bill[field[0]]"
+                (input)="setText(field[0], $any($event.target).value)"
+              />
+            }
+          </label>
+        }
+        <div class="row">
+          <button type="button" class="btn small" (click)="pickImage('companyLogoMediaId')">
+            Choose logo
+          </button>
+          @if (bill.companyLogoMediaId) {
+            <button type="button" class="btn small" (click)="set({ companyLogoMediaId: null })">
+              Remove logo
+            </button>
+          }
+        </div>
+      </details>
+      <details class="group" open>
+        <summary>Recipient</summary>
+        @for (field of recipientFields; track field[0]) {
+          <label class="field"
+            >{{ field[1] }}
+            @if (field[2]) {
+              <textarea
+                rows="2"
+                [attr.maxlength]="limits[field[0]]"
+                [value]="bill[field[0]]"
+                (input)="setText(field[0], $any($event.target).value)"
+              ></textarea>
+            } @else {
+              <input
+                [attr.maxlength]="limits[field[0]]"
+                [value]="bill[field[0]]"
+                (input)="setText(field[0], $any($event.target).value)"
+              />
+            }
+          </label>
+        }
+      </details>
+      <details class="group" open>
+        <summary>Items</summary>
+        @for (
+          item of bill.items;
+          track item.id;
+          let i = $index;
+          let first = $first;
+          let last = $last
+        ) {
+          <div class="item">
+            <textarea
+              rows="2"
+              aria-label="Item description"
+              placeholder="Description"
+              [value]="item.text"
+              (input)="setItem(item.id, { text: $any($event.target).value })"
+            ></textarea>
+            <div class="row wrap">
+              @if (!item.fullWidth) {
+                <input
+                  class="grow"
+                  aria-label="Amount"
+                  placeholder="Amount"
+                  inputmode="decimal"
+                  [value]="item.amount"
+                  (input)="setItem(item.id, { amount: $any($event.target).value })"
+                />
+              }
+              <label class="check"
+                ><input
+                  type="checkbox"
+                  [checked]="item.fullWidth"
+                  (change)="setItem(item.id, { fullWidth: $any($event.target).checked })"
+                />
+                Full width</label
+              >
+            </div>
+            <div class="row wrap">
+              <select
+                aria-label="Text alignment"
+                (change)="setItem(item.id, { align: $any($event.target).value })"
+              >
+                <option value="left" [selected]="item.align === 'left'">Text left</option>
+                <option value="center" [selected]="item.align === 'center'">Text centre</option>
+                <option value="right" [selected]="item.align === 'right'">Text right</option>
+              </select>
+              <select
+                aria-label="Amount alignment"
+                (change)="setItem(item.id, { amountAlign: $any($event.target).value })"
+              >
+                <option value="left" [selected]="item.amountAlign === 'left'">Amount left</option>
+                <option value="center" [selected]="item.amountAlign === 'center'">
+                  Amount centre
+                </option>
+                <option value="right" [selected]="item.amountAlign === 'right'">
+                  Amount right
+                </option>
+              </select>
+              <button
+                type="button"
+                class="btn small"
+                aria-label="Indent less"
+                [disabled]="!item.indent"
+                (click)="setItem(item.id, { indent: item.indent - 1 })"
+              >
+                ⇤
+              </button>
+              <button
+                type="button"
+                class="btn small"
+                aria-label="Indent more"
+                [disabled]="item.indent >= 6"
+                (click)="setItem(item.id, { indent: item.indent + 1 })"
+              >
+                ⇥
+              </button>
+              <button
+                type="button"
+                class="btn small"
+                aria-label="Move item up"
+                [disabled]="first"
+                (click)="shiftItem(i, -1)"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                class="btn small"
+                aria-label="Move item down"
+                [disabled]="last"
+                (click)="shiftItem(i, 1)"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                class="btn small danger"
+                aria-label="Delete item"
+                (click)="removeItem(item.id)"
+              >
+                🗑
+              </button>
+            </div>
+          </div>
+        }
+        <button type="button" class="btn" (click)="addItem()">+ Add item</button>
+        <div class="row wrap">
+          <label class="field"
+            >Currency
+            <input
+              size="5"
+              maxlength="8"
+              [value]="bill.currency"
+              (input)="set({ currency: $any($event.target).value })"
+          /></label>
+          <label class="field"
+            >Tax %
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              [value]="bill.taxPercent"
+              (change)="setNumber('taxPercent', $any($event.target).value)"
+          /></label>
+          <label class="field"
+            >Discount
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              [value]="bill.discount"
+              (change)="setNumber('discount', $any($event.target).value)"
+          /></label>
+        </div>
+      </details>
+      <details class="group" open>
+        <summary>Closing</summary>
+        @for (field of closingFields; track field[0]) {
+          <label class="field"
+            >{{ field[1] }}
+            @if (field[2]) {
+              <textarea
+                rows="2"
+                [attr.maxlength]="limits[field[0]]"
+                [value]="bill[field[0]]"
+                (input)="setText(field[0], $any($event.target).value)"
+              ></textarea>
+            } @else {
+              <input
+                [attr.maxlength]="limits[field[0]]"
+                [value]="bill[field[0]]"
+                (input)="setText(field[0], $any($event.target).value)"
+              />
+            }
+          </label>
+        }
+        <div class="row">
+          <button type="button" class="btn small" (click)="pickImage('signatureMediaId')">
+            Choose signature
+          </button>
+          @if (bill.signatureMediaId) {
+            <button type="button" class="btn small" (click)="set({ signatureMediaId: null })">
+              Remove signature
+            </button>
+          }
+        </div>
+      </details>
+    </div>
+
+    <article class="paper print-area" aria-label="Preview">
+      <div class="head">
+        <div>
+          @if (bill.companyLogoMediaId) {
+            <img [src]="url(bill.companyLogoMediaId)" alt="Company logo" />
+          } @else {
+            <h2>{{ bill.companyName }}</h2>
+            <small>{{ bill.companyTagline }}</small>
+          }
+        </div>
+        <div class="right">{{ bill.companyAddress }}<br />{{ bill.companyPhone }}</div>
+      </div>
+      <h2 class="kind">{{ bill.docType }}</h2>
+      <div class="meta">
+        <span>{{ bill.billNo ? 'No. ' + bill.billNo : '' }}</span>
+        <span>{{ bill.date ? 'Date: ' + bill.date : '' }}</span>
+      </div>
+      <div>
+        To,<br /><strong>{{ bill.recipientName }}</strong
+        ><br />{{ bill.recipientAddress }}
+      </div>
+      <div>{{ bill.salutation }}</div>
+      <div>{{ bill.introText }}</div>
+      @for (item of bill.items; track item.id) {
+        <div class="line" [class.full]="item.fullWidth || !item.amount">
+          <span [style.text-align]="item.align" [style.padding-left.px]="item.indent * 20">{{
+            item.text
+          }}</span>
+          @if (!item.fullWidth && item.amount) {
+            <span [style.text-align]="item.amountAlign">{{ item.amount }}</span>
+          }
+        </div>
+      }
+      @if (sums(); as sum) {
+        @if (sum.count > 1 || sum.discount || sum.tax) {
+          <div>
+            @if (sum.discount || sum.tax) {
+              <div class="sum">
+                <span>Subtotal</span><span>{{ money(sum.subtotal, bill.currency) }}</span>
+              </div>
+            }
+            @if (sum.discount) {
+              <div class="sum">
+                <span>Discount</span><span>− {{ money(sum.discount, bill.currency) }}</span>
+              </div>
+            }
+            @if (sum.tax) {
+              <div class="sum">
+                <span>Tax ({{ bill.taxPercent }}%)</span
+                ><span>{{ money(sum.tax, bill.currency) }}</span>
+              </div>
+            }
+            <div class="sum total">
+              <span>Total</span><span>{{ money(sum.total, bill.currency) }}</span>
+            </div>
+          </div>
+        }
+      }
+      <div class="sign">
+        {{ bill.signOffText }}
+        @if (bill.signatureMediaId) {
+          <img [src]="url(bill.signatureMediaId)" alt="Signature" />
+        } @else {
+          <br /><br />
+        }
+        <div>
+          <strong>{{ bill.signerName }}</strong>
+        </div>
+      </div>
+      @if (bill.footerText) {
+        <div class="foot">{{ bill.footerText }}</div>
+      }
+    </article>
+  </div>
+} @else {
+  <header class="page-head">
+    <h1>Bills and quotations</h1>
+    <button type="button" class="btn" [disabled]="!store.loaded()" (click)="create('quotation')">
+      New quotation
+    </button>
+    <button type="button" class="btn primary" [disabled]="!store.loaded()" (click)="create('bill')">
+      New bill
+    </button>
+  </header>
+  @if (store.loaded() && !store.items().length) {
+    <p class="empty">No bills yet.</p>
+  }
+  <div class="tile-grid">
+    @for (bill of sorted(); track bill.id) {
+      <article class="tile">
+        <button type="button" class="tile-open" (click)="openId.set(bill.id)">
+          <strong>{{ bill.docType === 'bill' ? 'Bill' : 'Quotation' }} {{ bill.billNo }}</strong>
+          <span>{{ bill.recipientName || 'No recipient' }}</span>
+          <span class="muted">{{ bill.date }} · {{ total(bill) }}</span>
+        </button>
+        <div class="row end">
+          <button type="button" class="btn small" (click)="duplicate(bill)">Duplicate</button>
+          <button type="button" class="btn small danger" (click)="remove(bill)">Delete</button>
+        </div>
+      </article>
+    }
+  </div>
+}

@@ -1,0 +1,467 @@
+<div class="chat" [class.in-thread]="!!store.active()">
+  <aside class="list-pane" aria-label="Conversations">
+    <div class="row">
+      <h1 class="grow">Chat</h1>
+      <button type="button" class="btn primary" (click)="picking.set('new')">New chat</button>
+    </div>
+    @if (!store.connected()) {
+      <p class="muted" role="status">Connecting to live updates…</p>
+    }
+    <input
+      type="search"
+      aria-label="Filter conversations"
+      placeholder="Filter chats"
+      (input)="filter.set($any($event.target).value)"
+    />
+    <div class="conversations">
+      @for (item of conversations(); track item.id) {
+        <button
+          type="button"
+          class="conversation"
+          [class.active]="item.id === store.activeId()"
+          (click)="open(item.id)"
+        >
+          <span class="avatar" [style.background]="partner(item)?.color ?? '#64748b'">
+            @if (item.imageVersion) {
+              <img class="group-picture" [src]="imageUrl(item)" alt="" />
+            } @else {
+              {{ title(item).charAt(0) }}
+            }
+            @if (partner(item)?.online) {
+              <i class="online" title="Online"></i>
+            }
+          </span>
+          <span class="grow">
+            <strong class="truncate block-line">{{ title(item) }}</strong>
+            <span class="truncate block-line muted">{{ preview(item.lastMessage) }}</span>
+          </span>
+          @if (item.unread) {
+            <span class="pill">{{ item.unread }}</span>
+          }
+        </button>
+      } @empty {
+        <p class="empty">
+          {{ store.loaded() ? 'No chats yet. Start one with another user.' : 'Loading…' }}
+        </p>
+      }
+    </div>
+  </aside>
+
+  @if (store.active(); as conversation) {
+    <section
+      class="thread-pane"
+      (dragover)="dragOver($event)"
+      (drop)="dropped($event)"
+      aria-label="Messages"
+    >
+      <header class="toolbar">
+        <button type="button" class="btn back" aria-label="Back to chats" (click)="open(null)">
+          ←
+        </button>
+        <div class="grow">
+          <strong class="block-line truncate">{{ title(conversation) }}</strong>
+          <small class="muted">{{ typers() || subtitle(conversation) }}</small>
+        </div>
+        <button
+          type="button"
+          class="btn small"
+          [attr.aria-pressed]="searching()"
+          (click)="searching.set(!searching()); results.set(null)"
+        >
+          Search
+        </button>
+        <button type="button" class="btn small" (click)="exportMenu($event)">Export</button>
+        @if (conversation.type === 'group') {
+          <button
+            type="button"
+            class="btn small"
+            [attr.aria-pressed]="showInfo()"
+            (click)="showInfo.set(!showInfo())"
+          >
+            Members
+          </button>
+        }
+      </header>
+
+      @if (conversation.description && !showInfo()) {
+        <p class="description muted">{{ conversation.description }}</p>
+      }
+
+      @if (showInfo()) {
+        <div class="info">
+          <div class="row wrap">
+            @if (conversation.imageVersion) {
+              <img class="group-cover" [src]="imageUrl(conversation)" alt="Group picture" />
+            }
+            @if (isAdmin()) {
+              <button type="button" class="btn small" (click)="changeImage(conversation, true)">
+                {{ conversation.imageVersion ? 'Change picture' : 'Add picture' }}
+              </button>
+              @if (conversation.imageVersion) {
+                <button type="button" class="btn small" (click)="changeImage(conversation, false)">
+                  Remove picture
+                </button>
+              }
+            }
+          </div>
+          @if (isAdmin()) {
+            <textarea
+              rows="2"
+              maxlength="500"
+              aria-label="Group description"
+              placeholder="What is this group about?"
+              [value]="conversation.description"
+              (change)="describe(conversation, $any($event.target).value)"
+            ></textarea>
+          } @else if (conversation.description) {
+            <p>{{ conversation.description }}</p>
+          }
+          @for (member of conversation.members; track member.id) {
+            <div class="row">
+              <span class="dot" [class.on]="member.online"></span>
+              <span class="grow"
+                >{{ member.name }} <span class="muted">&#64;{{ member.username }}</span>
+                @if (member.role === 'admin') {
+                  <span class="chip">admin</span>
+                }
+              </span>
+              @if (isAdmin() && member.id !== myId()) {
+                <button
+                  type="button"
+                  class="btn small danger"
+                  (click)="removeMember(conversation, member.id)"
+                >
+                  Remove
+                </button>
+              }
+            </div>
+          }
+          <div class="row wrap">
+            @if (isAdmin()) {
+              <button type="button" class="btn small" (click)="picking.set('add')">
+                Add people
+              </button>
+              <button type="button" class="btn small" (click)="rename(conversation)">
+                Rename group
+              </button>
+            }
+            <button
+              type="button"
+              class="btn small danger"
+              (click)="removeMember(conversation, myId())"
+            >
+              Leave group
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (searching()) {
+        <div class="info">
+          <form class="row" (submit)="search($event)">
+            <input
+              class="grow"
+              name="q"
+              type="search"
+              aria-label="Search messages"
+              placeholder="Search this chat"
+            />
+            <button type="submit" class="btn small">Find</button>
+          </form>
+          @if (results(); as found) {
+            @for (message of found; track message.id) {
+              <div>
+                <strong>{{ members().get(message.senderId)?.name ?? 'Former member' }}</strong>
+                <small class="muted">{{ day(message.createdAt) }}</small>
+                <div>{{ message.text }}</div>
+              </div>
+            } @empty {
+              <p class="muted">No matches.</p>
+            }
+          }
+        </div>
+      }
+
+      <div class="messages" #list (scroll)="scrolled()">
+        @if (store.thread().hasMore) {
+          <button
+            type="button"
+            class="btn small older"
+            [disabled]="store.thread().loading"
+            (click)="loadOlder()"
+          >
+            Load earlier messages
+          </button>
+        }
+        @if (!store.thread().loaded) {
+          <p class="empty">Loading messages…</p>
+          @if (!store.thread().loading) {
+            <button type="button" class="btn older" (click)="store.loadThread(conversation.id)">
+              Retry
+            </button>
+          }
+        } @else if (!store.thread().messages.length) {
+          <p class="empty">Say hello 👋</p>
+        }
+        @for (message of store.thread().messages; track message.id; let i = $index) {
+          @if (newDay(i)) {
+            <div class="day">{{ day(message.createdAt) }}</div>
+          }
+          <article class="message" [class.mine]="message.senderId === myId()">
+            @if (conversation.type === 'group' && message.senderId !== myId()) {
+              <strong class="sender" [style.color]="members().get(message.senderId)?.color">{{
+                members().get(message.senderId)?.name ?? 'Former member'
+              }}</strong>
+            }
+            @if (message.deletedAt) {
+              <em class="muted">🚫 This message was deleted</em>
+            } @else {
+              @if (message.replyTo; as quoted) {
+                <blockquote>
+                  <strong>{{ members().get(quoted.senderId)?.name ?? 'Former member' }}</strong>
+                  <span>{{
+                    quoted.deleted ? 'Deleted message' : quoted.text || 'Attachment'
+                  }}</span>
+                </blockquote>
+              }
+              @for (file of message.attachments; track file.id) {
+                <div class="attachment">
+                  @switch (file.kind) {
+                    @case ('image') {
+                      <button
+                        type="button"
+                        class="image-open"
+                        [attr.aria-label]="'View ' + file.name"
+                        (click)="viewing.set(file)"
+                      >
+                        <img [src]="fileUrl(file)" [alt]="file.name" loading="lazy" />
+                      </button>
+                    }
+                    @case ('video') {
+                      <video [src]="fileUrl(file)" controls preload="metadata"></video>
+                    }
+                    @case ('audio') {
+                      <audio [src]="fileUrl(file)" controls preload="metadata"></audio>
+                    }
+                    @default {
+                      <a class="link-card" [href]="fileUrl(file, true)" download
+                        >📎 {{ file.name }} <small>({{ bytes(file.size) }})</small></a
+                      >
+                    }
+                  }
+                  <div class="row">
+                    <a class="tiny" [href]="fileUrl(file, true)" download>Download</a>
+                    @if (file.kind !== 'other') {
+                      <button type="button" class="tiny" (click)="saveToLibrary(file)">
+                        Save to library
+                      </button>
+                    }
+                  </div>
+                </div>
+              }
+              @if (editing()?.id === message.id) {
+                <textarea
+                  rows="3"
+                  aria-label="Edit message"
+                  [value]="editing()!.text"
+                  (input)="editing.set({ id: message.id, text: $any($event.target).value })"
+                  (keydown.escape)="editing.set(null)"
+                ></textarea>
+                <div class="row end">
+                  <button type="button" class="btn small" (click)="editing.set(null)">
+                    Cancel
+                  </button>
+                  <button type="button" class="btn small primary" (click)="saveEdit(message)">
+                    Save
+                  </button>
+                </div>
+              } @else if (message.text) {
+                <div class="text">{{ message.text }}</div>
+              }
+            }
+            <footer>
+              <small class="muted"
+                >{{ clock(message.createdAt)
+                }}{{ message.editedAt && !message.deletedAt ? ' · edited' : '' }}</small
+              >
+              @if (seenBy()?.id === message.id) {
+                <small class="muted">· {{ seenBy()!.label }}</small>
+              }
+            </footer>
+            @if (message.reactions.length) {
+              <div class="reactions">
+                @for (group of groups(message, myId()); track group.emoji) {
+                  <button
+                    type="button"
+                    class="reaction"
+                    [attr.aria-pressed]="group.mine"
+                    (click)="react(message, group.emoji)"
+                  >
+                    {{ group.emoji }} {{ group.count }}
+                  </button>
+                }
+              </div>
+            }
+            @if (!message.deletedAt) {
+              <div class="actions">
+                <button type="button" class="tiny" (click)="reply(message)">Reply</button>
+                <button
+                  type="button"
+                  class="tiny"
+                  [attr.aria-expanded]="reactingTo() === message.id"
+                  (click)="reactingTo.set(reactingTo() === message.id ? null : message.id)"
+                >
+                  React
+                </button>
+                @if (message.text) {
+                  <button type="button" class="tiny" (click)="copy(message.text)">Copy</button>
+                }
+                @if (message.senderId === myId()) {
+                  <button type="button" class="tiny" (click)="startEdit(message)">Edit</button>
+                }
+                @if (message.senderId === myId() || (conversation.type === 'group' && isAdmin())) {
+                  <button type="button" class="tiny danger-text" (click)="deleteMessage(message)">
+                    Delete
+                  </button>
+                }
+              </div>
+            }
+            @if (reactingTo() === message.id) {
+              <div class="row wrap">
+                @for (emoji of quick; track emoji) {
+                  <button type="button" class="btn small" (click)="react(message, emoji)">
+                    {{ emoji }}
+                  </button>
+                }
+              </div>
+            }
+          </article>
+        }
+      </div>
+
+      <div class="composer">
+        @if (draft().replyTo; as quoted) {
+          <div class="row reply-bar">
+            <span class="grow truncate">Replying to: {{ preview(quoted) }}</span>
+            <button
+              type="button"
+              class="btn ghost icon"
+              aria-label="Cancel reply"
+              (click)="cancelReply()"
+            >
+              ✕
+            </button>
+          </div>
+        }
+        @if (draft().files.length) {
+          <div class="row wrap">
+            @for (pending of draft().files; track pending.key) {
+              <span class="chip">
+                {{ pending.file ? '📎' : '⏳' }} {{ pending.name }}
+                <button
+                  type="button"
+                  class="tiny"
+                  [attr.aria-label]="'Remove ' + pending.name"
+                  (click)="removePending(pending.key)"
+                >
+                  ✕
+                </button>
+              </span>
+            }
+          </div>
+        }
+        @if (emojiOpen()) {
+          <div class="emoji-grid">
+            @for (emoji of emojis; track emoji) {
+              <button type="button" class="btn ghost icon" (click)="addEmoji(emoji)">
+                {{ emoji }}
+              </button>
+            }
+          </div>
+        }
+        <div class="row">
+          <button
+            type="button"
+            class="btn icon"
+            title="Emoji"
+            aria-label="Emoji"
+            [attr.aria-pressed]="emojiOpen()"
+            (click)="emojiOpen.set(!emojiOpen())"
+          >
+            😊
+          </button>
+          <button
+            type="button"
+            class="btn icon"
+            title="Send pictures or videos"
+            aria-label="Send pictures or videos"
+            (click)="chooseFiles('image/*,video/*')"
+          >
+            🖼
+          </button>
+          <button
+            type="button"
+            class="btn icon"
+            title="Send a file"
+            aria-label="Send a file"
+            (click)="chooseFiles('')"
+          >
+            📎
+          </button>
+          <button
+            type="button"
+            class="btn icon"
+            title="From your library"
+            aria-label="Attach from your library"
+            (click)="fromLibrary()"
+          >
+            📁
+          </button>
+          <button
+            type="button"
+            class="btn icon"
+            [class.danger]="recording()"
+            [title]="recording() ? 'Stop recording' : 'Record voice message'"
+            [attr.aria-label]="recording() ? 'Stop recording' : 'Record voice message'"
+            (click)="record()"
+          >
+            {{ recording() ? '⏹' : '🎤' }}
+          </button>
+          <textarea
+            #composer
+            rows="1"
+            class="grow"
+            aria-label="Message"
+            placeholder="Type a message (Shift+Enter for a new line)"
+            maxlength="5000"
+            [value]="draft().text"
+            (input)="typed($any($event.target).value)"
+            (keydown)="composerKey($event)"
+            (paste)="pasted($event)"
+          ></textarea>
+          <button type="button" class="btn primary" [disabled]="!canSend()" (click)="send()">
+            Send
+          </button>
+        </div>
+      </div>
+    </section>
+  } @else {
+    <section class="thread-pane placeholder">
+      <p class="empty">Choose a conversation, or start a new one.</p>
+    </section>
+  }
+</div>
+
+@if (picking(); as mode) {
+  <app-people-picker
+    [addingTo]="mode === 'add' ? memberIds() : null"
+    (picked)="peoplePicked($event)"
+    (closed)="picking.set(null)"
+  />
+}
+@if (viewing(); as file) {
+  <app-modal [heading]="file.name" [wide]="true" (closed)="viewing.set(null)">
+    <img class="full-image" [src]="fileUrl(file)" [alt]="file.name" />
+    <a class="btn" [href]="fileUrl(file, true)" download>Download</a>
+  </app-modal>
+}

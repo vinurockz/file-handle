@@ -1,0 +1,316 @@
+<header class="page-head">
+  <nav class="row crumbs" aria-label="Breadcrumb">
+    <button
+      type="button"
+      class="btn ghost"
+      (click)="openFolder(null)"
+      (dragover)="allowDrop($event)"
+      (drop)="dropFiles($event, null)"
+    >
+      <strong>My Files</strong>
+    </button>
+    @for (folder of path(); track folder.id) {
+      <span aria-hidden="true">›</span>
+      <button
+        type="button"
+        class="btn ghost"
+        (click)="openFolder(folder.id)"
+        (dragover)="allowDrop($event)"
+        (drop)="dropFiles($event, folder.id)"
+      >
+        {{ folder.name }}
+      </button>
+    }
+  </nav>
+  <button type="button" class="btn" (click)="newFolder()">New folder</button>
+  <button type="button" class="btn" [disabled]="!!working()" (click)="importZip()">
+    Import ZIP
+  </button>
+  <button type="button" class="btn" [disabled]="!!working()" (click)="exportFolder(folderId())">
+    {{ folderId() ? 'Download folder' : 'Back up all' }}
+  </button>
+  <button type="button" class="btn primary" [disabled]="library.uploading() > 0" (click)="upload()">
+    {{ library.uploading() ? 'Uploading…' : 'Upload' }}
+  </button>
+</header>
+
+<h1 class="muted">
+  {{ searching() ? 'Search results' : (path().at(-1)?.name ?? 'All your files') }}
+</h1>
+
+<div class="row wrap">
+  <input
+    class="grow"
+    type="search"
+    aria-label="Search all files"
+    placeholder="Search all files and folders"
+    [value]="query()"
+    (input)="query.set($any($event.target).value)"
+  />
+  <div class="row" role="group" aria-label="File type">
+    @for (option of kinds; track option) {
+      <button
+        type="button"
+        class="btn small"
+        [attr.aria-pressed]="kind() === option"
+        (click)="kind.set(option)"
+      >
+        {{ option === 'all' ? 'All' : option === 'pdf' ? 'PDF' : option }}
+      </button>
+    }
+  </div>
+  <select aria-label="Sort files" (change)="sort.set($any($event.target).value)">
+    <option value="newest">Newest first</option>
+    <option value="name">Name</option>
+    <option value="size">Largest first</option>
+  </select>
+  <button
+    type="button"
+    class="btn small"
+    [attr.aria-pressed]="view() === 'grid'"
+    (click)="setView('grid')"
+  >
+    Grid
+  </button>
+  <button
+    type="button"
+    class="btn small"
+    [attr.aria-pressed]="view() === 'list'"
+    (click)="setView('list')"
+  >
+    List
+  </button>
+</div>
+
+@if (presentColors().length > 1 || colorFilter()) {
+  <div class="row wrap" role="group" aria-label="Filter pictures by colour">
+    <span class="muted">Colour</span>
+    <button
+      type="button"
+      class="btn small"
+      [attr.aria-pressed]="!colorFilter()"
+      (click)="colorFilter.set(null)"
+    >
+      Any
+    </button>
+    @for (name of presentColors(); track name) {
+      <button
+        type="button"
+        class="swatch"
+        [style.background]="name"
+        [attr.aria-label]="name"
+        [title]="name"
+        [attr.aria-pressed]="colorFilter() === name"
+        (click)="colorFilter.set(name)"
+      ></button>
+      <small class="muted">{{ colorCounts().get(name) ?? 0 }}</small>
+    }
+  </div>
+}
+
+@if (working()) {
+  <p role="status">{{ working() }}</p>
+}
+
+@if (selected().size) {
+  <div class="row wrap selection-bar">
+    <strong class="grow">{{ selected().size }} selected</strong>
+    <button type="button" class="btn small" (click)="selectAll()">Select all</button>
+    <button type="button" class="btn small" (click)="moveSelected()">Move to…</button>
+    <button type="button" class="btn small" [disabled]="!!working()" (click)="downloadSelected()">
+      Download ZIP
+    </button>
+    <button type="button" class="btn small danger" (click)="removeSelected()">Delete</button>
+    <button type="button" class="btn small" (click)="selected.set(newSelection())">Clear</button>
+  </div>
+}
+
+@if (subfolders().length) {
+  <div class="tile-grid">
+    @for (folder of subfolders(); track folder.id) {
+      @let summary = summaries().get(folder.id);
+      <article
+        class="tile folder"
+        [style.border-top-color]="folder.color || 'var(--border)'"
+        (contextmenu)="folderMenu($event, folder)"
+        (dragover)="allowDrop($event)"
+        (drop)="dropFiles($event, folder.id)"
+      >
+        @if (summary?.cover?.kind === 'image') {
+          <img class="cover" [src]="url(summary!.cover!.id)" alt="" loading="lazy" />
+        } @else if (summary?.cover) {
+          <video
+            class="cover"
+            [src]="url(summary!.cover!.id) + '#t=0.1'"
+            preload="metadata"
+            muted
+          ></video>
+        } @else {
+          <span class="cover" aria-hidden="true">📁</span>
+        }
+        <button type="button" class="tile-open" (click)="openFolder(folder.id)">
+          <strong class="truncate">{{ folder.name }}</strong>
+          <small class="muted"
+            >{{ summary?.count ?? 0 }} {{ summary?.count === 1 ? 'file' : 'files' }}</small
+          >
+        </button>
+        <button
+          type="button"
+          class="btn ghost icon"
+          [attr.aria-label]="'Options for folder ' + folder.name"
+          (click)="folderMenu($event, folder)"
+        >
+          ⋮
+        </button>
+      </article>
+    }
+  </div>
+}
+
+@if (!library.loaded()) {
+  <p class="empty">Loading your files…</p>
+} @else if (!visible().length) {
+  <p class="empty">No files here. Upload, or drag files from your computer onto this page.</p>
+} @else if (view() === 'grid') {
+  <div class="media-grid">
+    @for (item of visible(); track item.id) {
+      <article
+        class="media-card"
+        draggable="true"
+        [class.selected]="selected().has(item.id)"
+        (contextmenu)="fileMenu($event, item)"
+        (dragstart)="dragStart($event, item)"
+      >
+        <input
+          class="card-check"
+          type="checkbox"
+          [checked]="selected().has(item.id)"
+          [attr.aria-label]="'Select ' + item.title"
+          (change)="toggle(item.id)"
+        />
+        <button
+          type="button"
+          class="open-card"
+          [attr.aria-label]="'Open ' + item.title"
+          (click)="viewing.set(item.id)"
+        >
+          <app-thumb [item]="item" />
+        </button>
+        <span class="media-title" [title]="item.title">{{ item.title }}</span>
+        <div class="card-actions">
+          <small class="muted">{{ bytes(item.size) }}</small>
+          <span>
+            <button
+              type="button"
+              class="btn ghost icon"
+              [attr.aria-label]="'Rename ' + item.title"
+              (click)="rename(item)"
+            >
+              ✏️
+            </button>
+            <button
+              type="button"
+              class="btn ghost icon"
+              [attr.aria-label]="'Delete ' + item.title"
+              (click)="remove([item])"
+            >
+              🗑
+            </button>
+            <button
+              type="button"
+              class="btn ghost icon"
+              [attr.aria-label]="'More options for ' + item.title"
+              (click)="fileMenu($event, item)"
+            >
+              ⋮
+            </button>
+          </span>
+        </div>
+      </article>
+    }
+  </div>
+} @else {
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr>
+          <th><span class="muted">Select</span></th>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Size</th>
+          <th>Uploaded</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (item of visible(); track item.id) {
+          <tr
+            draggable="true"
+            (dragstart)="dragStart($event, item)"
+            (contextmenu)="fileMenu($event, item)"
+          >
+            <td>
+              <input
+                type="checkbox"
+                [checked]="selected().has(item.id)"
+                [attr.aria-label]="'Select ' + item.title"
+                (change)="toggle(item.id)"
+              />
+            </td>
+            <td>
+              <button type="button" class="btn link" (click)="viewing.set(item.id)">
+                {{ item.title }}
+              </button>
+            </td>
+            <td>{{ item.kind }}</td>
+            <td>{{ bytes(item.size) }}</td>
+            <td>{{ dateOf(item.createdAt) }}</td>
+            <td>
+              <button
+                type="button"
+                class="btn ghost icon"
+                [attr.aria-label]="'Rename ' + item.title"
+                (click)="rename(item)"
+              >
+                ✏️
+              </button>
+              <button
+                type="button"
+                class="btn ghost icon"
+                [attr.aria-label]="'Delete ' + item.title"
+                (click)="remove([item])"
+              >
+                🗑
+              </button>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+}
+
+@if (viewing(); as id) {
+  <app-viewer [items]="visible()" [startId]="id" (closed)="viewing.set(null)" />
+}
+
+@if (moving()) {
+  <app-modal heading="Move to" (closed)="moving.set(null)">
+    <button type="button" class="btn tree-pick primary" (click)="moveToNewFolder()">
+      ＋ New folder…
+    </button>
+    <button type="button" class="btn tree-pick" (click)="moveTo(null)">
+      📁 My Files (top level)
+    </button>
+    @for (option of moveTargets(); track option.id) {
+      <button
+        type="button"
+        class="btn tree-pick"
+        [style.padding-left.px]="24 + option.depth * 18"
+        (click)="moveTo(option.id)"
+      >
+        📁 {{ option.label }}
+      </button>
+    }
+  </app-modal>
+}

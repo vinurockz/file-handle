@@ -1,0 +1,517 @@
+@if (!opened()) {
+  <div class="page">
+    <header class="page-head">
+      <h1>PDF Editor</h1>
+      <button type="button" class="btn" [disabled]="!!busy()" (click)="newBlank()">
+        New blank PDF
+      </button>
+      <button type="button" class="btn" [disabled]="!!busy()" (click)="fromImages()">
+        Pictures to PDF
+      </button>
+      <button type="button" class="btn primary" [disabled]="!!busy()" (click)="uploadPdf()">
+        Upload PDF
+      </button>
+    </header>
+    @if (busy()) {
+      <p role="status">{{ busy() }}</p>
+    }
+    @if (saved().length) {
+      <h2>Continue editing</h2>
+      <div class="tile-grid">
+        @for (project of saved(); track project.id) {
+          <article class="tile">
+            <button type="button" class="tile-open" (click)="resume(project)">
+              <strong>📝 {{ project.name }}</strong>
+              <span class="muted">{{ project.doc.pages.length }} pages</span>
+            </button>
+            <div class="row end">
+              <button type="button" class="btn small danger" (click)="deleteProject(project)">
+                Delete
+              </button>
+            </div>
+          </article>
+        }
+      </div>
+    }
+    <h2>PDFs in your library</h2>
+    <nav class="row wrap" aria-label="PDF folders">
+      <button type="button" class="btn ghost" (click)="folderId.set(null)">All folders</button>
+      @for (folder of folderPath(); track folder.id) {
+        <span aria-hidden="true">›</span>
+        <button type="button" class="btn ghost" (click)="folderId.set(folder.id)">
+          {{ folder.name }}
+        </button>
+      }
+      <span class="grow"></span>
+      <button type="button" class="btn small" (click)="newPdfFolder()">New folder</button>
+    </nav>
+    @if (pdfFolders().length) {
+      <div class="tile-grid">
+        @for (entry of pdfFolders(); track entry.folder.id) {
+          <article class="tile" [style.border-top-color]="entry.folder.color || 'var(--border)'">
+            <button type="button" class="tile-open" (click)="folderId.set(entry.folder.id)">
+              <strong>📁 {{ entry.folder.name }}</strong
+              ><span class="muted">{{ entry.count }} {{ entry.count === 1 ? 'PDF' : 'PDFs' }}</span>
+            </button>
+          </article>
+        }
+      </div>
+    }
+    @if (library.loaded() && !pdfs().length) {
+      <p class="empty">No PDFs in this folder. Upload one or start a blank page.</p>
+    }
+    <div class="tile-grid">
+      @for (item of pdfs(); track item.id) {
+        <article class="tile">
+          <button type="button" class="tile-open" (click)="openFile(item)">
+            <strong>📄 {{ item.title }}</strong>
+          </button>
+        </article>
+      }
+    </div>
+  </div>
+} @else {
+  <div class="editor">
+    <div>
+      <div class="toolbar">
+        <button type="button" class="btn" (click)="closeDocument()">← PDFs</button>
+        <strong class="grow truncate">{{ opened()!.name }}</strong>
+        @if (busy()) {
+          <span role="status">{{ busy() }}</span>
+        }
+        <button
+          type="button"
+          class="btn"
+          aria-label="Undo"
+          [disabled]="!history.canUndo()"
+          (click)="history.undo()"
+        >
+          ↶
+        </button>
+        <button
+          type="button"
+          class="btn"
+          aria-label="Redo"
+          [disabled]="!history.canRedo()"
+          (click)="history.redo()"
+        >
+          ↷
+        </button>
+        <span class="sep"></span>
+        <button
+          type="button"
+          class="btn"
+          aria-label="Zoom out"
+          (click)="zoom.set(zoom() > 0.4 ? zoom() - 0.2 : zoom())"
+        >
+          −
+        </button>
+        <span>{{ zoomLabel() }}</span>
+        <button
+          type="button"
+          class="btn"
+          aria-label="Zoom in"
+          (click)="zoom.set(zoom() < 3.8 ? zoom() + 0.2 : zoom())"
+        >
+          +
+        </button>
+        <span class="sep"></span>
+        <button type="button" class="btn" [disabled]="!!busy()" (click)="download()">
+          Download
+        </button>
+        <button type="button" class="btn primary" [disabled]="!!busy()" (click)="saveCopy()">
+          Save to library
+        </button>
+      </div>
+      <div class="toolbar" role="toolbar" aria-label="Annotation tools">
+        @for (item of tools; track item.id) {
+          <button
+            type="button"
+            class="btn small"
+            [title]="item.label"
+            [attr.aria-pressed]="tool() === item.id"
+            (click)="tool.set(item.id); selectedId.set(null)"
+          >
+            <span aria-hidden="true">{{ item.icon }}</span> {{ item.label }}
+          </button>
+        }
+        <span class="sep"></span>
+        <button type="button" class="btn small" (click)="addPicture()">🖼 Image</button>
+        <button type="button" class="btn small" (click)="signing.set(true)">✍ Signature</button>
+      </div>
+    </div>
+
+    <div class="workbench">
+      <aside class="panel" aria-label="Pages">
+        <div class="palette">
+          <button type="button" class="btn" (click)="rotate(270)">⟲ Rotate</button>
+          <button type="button" class="btn" (click)="rotate(90)">⟳ Rotate</button>
+          <button type="button" class="btn" (click)="insertBlank()">+ Blank</button>
+          <button type="button" class="btn" (click)="duplicatePage()">Duplicate</button>
+          <button type="button" class="btn" (click)="mergePdf()">Merge PDF</button>
+          <button type="button" class="btn" [disabled]="!!busy()" (click)="extract()">
+            Extract
+          </button>
+          <button type="button" class="btn" [disabled]="!!busy()" (click)="split()">
+            Split all
+          </button>
+          <button type="button" class="btn danger" (click)="deletePages()">Delete</button>
+        </div>
+        <small class="muted">Tick pages to delete or extract several. Drag to reorder.</small>
+        <div class="thumbs" cdkDropList (cdkDropListDropped)="dropPage($event)">
+          @for (item of doc().pages; track item.key; let i = $index) {
+            <div
+              class="thumb-page"
+              cdkDrag
+              [class.current]="item.key === page()?.key"
+              [cdkDragStartDelay]="{ touch: 250, mouse: 0 }"
+            >
+              <input
+                type="checkbox"
+                [checked]="checked().has(item.key)"
+                [attr.aria-label]="'Tick page ' + (i + 1)"
+                (change)="toggleCheck(item.key)"
+              />
+              <button type="button" [attr.aria-label]="'Go to page ' + (i + 1)" (click)="goTo(i)">
+                @defer (on viewport) {
+                  <app-pdf-page
+                    [page]="item"
+                    [pdf]="documentFor(item)"
+                    [scale]="thumbScale(item)"
+                  />
+                } @placeholder {
+                  <span class="thumb-wait">…</span>
+                }
+                <span>{{ i + 1 }}</span>
+              </button>
+            </div>
+          }
+        </div>
+      </aside>
+
+      <div class="stage" #stage>
+        <div class="row">
+          <button
+            type="button"
+            class="btn small"
+            aria-label="Previous page"
+            [disabled]="pageIndex() === 0"
+            (click)="goTo(pageIndex() - 1)"
+          >
+            ←
+          </button>
+          <span>Page {{ pageIndex() + 1 }} of {{ doc().pages.length }}</span>
+          <button
+            type="button"
+            class="btn small"
+            aria-label="Next page"
+            [disabled]="pageIndex() >= doc().pages.length - 1"
+            (click)="goTo(pageIndex() + 1)"
+          >
+            →
+          </button>
+        </div>
+        @if (page(); as current) {
+          <div
+            #sheet
+            class="sheet"
+            [attr.data-tool]="tool()"
+            [class.drawing]="tool() !== 'select' && !selectingText()"
+            (pointerdown)="pointerDown($event)"
+            (pointerup)="markSelection()"
+          >
+            <app-pdf-page
+              [page]="current"
+              [pdf]="documentFor(current)"
+              [scale]="zoom()"
+              [withText]="true"
+              [selectable]="selectingText()"
+            />
+            <app-annotation-layer
+              [page]="current"
+              [marks]="marks()"
+              [selectedId]="selectedId()"
+              [pickable]="tool() === 'select'"
+              (picked)="selectedId.set($event)"
+              (grabbed)="grab($event)"
+            />
+            @if (marquee(); as area) {
+              <div
+                class="marquee"
+                [style.left.%]="area.x * 100"
+                [style.top.%]="area.y * 100"
+                [style.width.%]="area.w * 100"
+                [style.height.%]="area.h * 100"
+              ></div>
+            }
+          </div>
+        }
+      </div>
+
+      <aside class="panel" aria-label="Properties">
+        @if (selected(); as mark) {
+          <h3>Selected {{ mark.type }}</h3>
+          @if (mark.type !== 'redact' && mark.type !== 'image') {
+            <label class="field"
+              >Colour
+              <input
+                type="color"
+                [value]="mark.color"
+                (input)="change(mark.id, { color: $any($event.target).value }, 'color:' + mark.id)"
+            /></label>
+          }
+          @if (mark.type === 'text') {
+            <textarea
+              rows="4"
+              aria-label="Text content"
+              [value]="mark.text"
+              (input)="editText({ text: $any($event.target).value })"
+            ></textarea>
+            <app-slider
+              label="Text size"
+              unit="pt"
+              [min]="6"
+              [max]="96"
+              [value]="mark.size"
+              (changed)="editText({ size: $event })"
+            />
+            <label class="check"
+              ><input
+                type="checkbox"
+                [checked]="mark.bold"
+                (change)="editText({ bold: $any($event.target).checked })"
+              />
+              Bold</label
+            >
+          }
+          @if (mark.type === 'comment') {
+            <textarea
+              rows="5"
+              aria-label="Comment"
+              [value]="mark.text"
+              (input)="change(mark.id, { text: $any($event.target).value }, 'comment:' + mark.id)"
+            ></textarea>
+          }
+          @if (mark.type === 'image' || mark.type === 'stamp') {
+            <app-slider
+              label="Width"
+              unit="pt"
+              [min]="30"
+              [max]="600"
+              [value]="roundValue(mark.w)"
+              (changed)="scaleBox($event)"
+            />
+          }
+          @if (mark.type === 'highlight' || mark.type === 'underline' || mark.type === 'strike') {
+            <p class="muted">“{{ mark.text }}”</p>
+          }
+          <button type="button" class="btn danger" (click)="deleteSelected()">
+            Delete annotation
+          </button>
+        } @else {
+          <h3>Tool options</h3>
+          @if (tool() === 'highlight' || tool() === 'marker') {
+            <div class="row wrap">
+              @for (swatch of swatches; track swatch) {
+                <button
+                  type="button"
+                  class="swatch"
+                  [style.background]="swatch"
+                  [attr.aria-label]="'Highlight colour ' + swatch"
+                  [attr.aria-pressed]="highlightColor() === swatch"
+                  (click)="highlightColor.set(swatch)"
+                ></button>
+              }
+              <input
+                type="color"
+                aria-label="Custom highlight colour"
+                [value]="highlightColor()"
+                (input)="highlightColor.set($any($event.target).value)"
+              />
+            </div>
+          } @else {
+            <label class="field"
+              >Colour
+              <input type="color" [value]="color()" (input)="color.set($any($event.target).value)"
+            /></label>
+          }
+          <app-slider
+            label="Line width"
+            unit="pt"
+            [min]="1"
+            [max]="12"
+            [value]="strokeWidth()"
+            (changed)="strokeWidth.set($event)"
+          />
+          <app-slider
+            label="New text size"
+            unit="pt"
+            [min]="6"
+            [max]="96"
+            [value]="fontSize()"
+            (changed)="fontSize.set($event)"
+          />
+          @if (tool() === 'rect' || tool() === 'ellipse') {
+            <label class="check"
+              ><input
+                type="checkbox"
+                [checked]="!!fill()"
+                (change)="fill.set($any($event.target).checked ? '#fde68a' : '')"
+              />
+              Fill shape</label
+            >
+            @if (fill()) {
+              <input
+                type="color"
+                aria-label="Fill colour"
+                [value]="fill()"
+                (input)="fill.set($any($event.target).value)"
+              />
+            }
+          }
+          @if (tool() === 'stamp') {
+            <select aria-label="Stamp" (change)="stampText.set($any($event.target).value)">
+              @for (stamp of stamps; track stamp) {
+                <option [selected]="stampText() === stamp">{{ stamp }}</option>
+              }
+            </select>
+          }
+          @if (selectingText()) {
+            <p class="muted">
+              Drag across text on the page to mark it. Scanned pages have no selectable text; use
+              Marker instead.
+            </p>
+          }
+          @if (tool() === 'whiteout') {
+            <p class="muted">
+              Whiteout only covers content; the text underneath stays in the file. Use Redact to
+              remove it.
+            </p>
+          }
+          @if (tool() === 'redact') {
+            <p class="muted">
+              On export, a redacted page is turned into a picture, so the covered content is really
+              removed.
+            </p>
+          }
+        }
+
+        <details class="group">
+          <summary>Find text</summary>
+          <form class="row" (submit)="search($event)">
+            <input
+              class="grow"
+              type="search"
+              aria-label="Find in PDF"
+              [value]="searchText()"
+              (input)="searchText.set($any($event.target).value)"
+            />
+            <button type="submit" class="btn small">Find</button>
+          </form>
+          @if (searchHits(); as hits) {
+            @if (!hits.length) {
+              <p class="muted">No matches.</p>
+            }
+            @for (hit of hits; track hit.key) {
+              <button type="button" class="btn small hit" (click)="goTo(hit.number - 1)">
+                p.{{ hit.number }} …{{ hit.snippet }}…
+              </button>
+            }
+          }
+        </details>
+        @if (comments().length) {
+          <details class="group" open>
+            <summary>Comments ({{ comments().length }})</summary>
+            @for (entry of comments(); track entry.mark.id) {
+              <button
+                type="button"
+                class="btn small hit"
+                (click)="goTo(entry.number - 1); tool.set('select'); selectedId.set(entry.mark.id)"
+              >
+                p.{{ entry.number }}: {{ entry.mark.text }}
+              </button>
+            }
+          </details>
+        }
+        @if (formFields().length) {
+          <details class="group" open>
+            <summary>Fill form ({{ formFields().length }})</summary>
+            <small class="muted">Values appear in the downloaded or saved PDF.</small>
+            @for (field of formFields(); track field.source + field.name) {
+              <label class="field"
+                >{{ field.name }}
+                @switch (field.type) {
+                  @case ('check') {
+                    <input
+                      type="checkbox"
+                      [checked]="formValue(field) === true"
+                      (change)="setForm(field, $any($event.target).checked)"
+                    />
+                  }
+                  @case ('choice') {
+                    <select (change)="setForm(field, $any($event.target).value)">
+                      <option value="">—</option>
+                      @for (option of field.options; track option) {
+                        <option [selected]="formValue(field) === option">{{ option }}</option>
+                      }
+                    </select>
+                  }
+                  @default {
+                    <input
+                      [value]="formValue(field)"
+                      (input)="setForm(field, $any($event.target).value)"
+                    />
+                  }
+                }
+              </label>
+            }
+          </details>
+        }
+        <details class="group">
+          <summary>Watermark and page numbers</summary>
+          <label class="field"
+            >Watermark text
+            <input
+              [value]="doc().watermark?.text ?? ''"
+              (input)="setWatermark({ text: $any($event.target).value })"
+          /></label>
+          @if (doc().watermark; as watermark) {
+            <input
+              type="color"
+              aria-label="Watermark colour"
+              [value]="watermark.color"
+              (input)="setWatermark({ color: $any($event.target).value })"
+            />
+            <app-slider
+              label="Opacity"
+              unit="%"
+              [min]="5"
+              [value]="roundValue(watermark.opacity * 100)"
+              (changed)="setWatermark({ opacity: $event / 100 })"
+            />
+            <app-slider
+              label="Size"
+              unit="pt"
+              [min]="12"
+              [max]="140"
+              [value]="watermark.size"
+              (changed)="setWatermark({ size: $event })"
+            />
+          }
+          <label class="check"
+            ><input
+              type="checkbox"
+              [checked]="doc().pageNumbers"
+              (change)="setPageNumbers($any($event.target).checked)"
+            />
+            Add page numbers</label
+          >
+          <small class="muted">Both are added to the exported file.</small>
+        </details>
+      </aside>
+    </div>
+  </div>
+}
+@if (signing()) {
+  <app-signature-pad (done)="signed($event)" />
+}

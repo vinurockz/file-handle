@@ -1,0 +1,159 @@
+<header class="bar">
+  <span class="brand">◆ Studio</span>
+  <span class="grow"></span>
+  <span class="avatar" [style.background]="auth.user()?.color" aria-hidden="true">
+    {{ auth.user()?.name?.charAt(0) }}
+  </span>
+  <span class="who truncate">{{ auth.user()?.name }}</span>
+  <button type="button" class="btn" (click)="signOut()">Sign out</button>
+</header>
+
+<main class="content">
+  <div class="intro">
+    <div class="grow">
+      <h1>Your customers</h1>
+      <p class="muted">
+        Each customer has their own files and projects. Your chats stay with your account.
+      </p>
+    </div>
+    @if (auth.workspaces().length > 6) {
+      <input
+        type="search"
+        aria-label="Search customers"
+        placeholder="Search customers"
+        [value]="query()"
+        (input)="query.set($any($event.target).value)"
+      />
+    }
+    @if (auth.workspaces().length) {
+      <button type="button" class="btn primary large" (click)="creating.set(true)">
+        New customer
+      </button>
+    }
+  </div>
+
+  @if (!auth.workspaces().length) {
+    <section class="first">
+      <h2>Add your first customer</h2>
+      <p class="muted">You need one before you can add files or start a project.</p>
+      <ng-container [ngTemplateOutlet]="createForm" />
+    </section>
+  } @else {
+    <ul class="grid">
+      @for (customer of visible(); track customer.id) {
+        <li class="customer" [style.--customer]="customer.color">
+          <button
+            type="button"
+            class="open"
+            [disabled]="!!opening()"
+            (click)="enter(customer.id)"
+            (contextmenu)="menu($event, customer)"
+          >
+            <span class="cover" aria-hidden="true">
+              @if (customer.hasPhoto) {
+                <img [src]="photo(customer)" alt="" />
+              } @else {
+                <span class="initials">{{ initialsOf(customer.name) }}</span>
+              }
+            </span>
+            <span class="details">
+              <strong class="truncate">{{ customer.name }}</strong>
+              @if (customer.description) {
+                <span class="description">{{ customer.description }}</span>
+              }
+              <small class="muted">
+                @if (opening() === customer.id) {
+                  Opening…
+                } @else {
+                  Added {{ added(customer) }}
+                }
+              </small>
+            </span>
+          </button>
+          @if (auth.workspaceId() === customer.id) {
+            <span class="current">Open now</span>
+          }
+          <button
+            type="button"
+            class="more"
+            [attr.aria-label]="'Options for ' + customer.name"
+            (click)="menu($event, customer)"
+          >
+            ⋮
+          </button>
+        </li>
+      }
+    </ul>
+    @if (query() && !visible().length) {
+      <p class="empty">No customer matches “{{ query() }}”.</p>
+    }
+  }
+</main>
+
+<ng-template #createForm>
+  <form class="col" (submit)="create($event)">
+    <label class="field">
+      Customer name
+      <input name="name" required autofocus maxlength="80" autocomplete="off" />
+    </label>
+    <label class="field">
+      Description (optional)
+      <input name="description" maxlength="500" autocomplete="off" />
+    </label>
+    <div class="row end">
+      @if (auth.workspaces().length) {
+        <button type="button" class="btn" (click)="creating.set(false)">Cancel</button>
+      }
+      <button type="submit" class="btn primary large" [disabled]="busy()">
+        {{ busy() ? 'Creating…' : 'Create customer' }}
+      </button>
+    </div>
+  </form>
+</ng-template>
+
+@if (creating() && auth.workspaces().length) {
+  <app-modal heading="New customer" (closed)="creating.set(false)">
+    <ng-container [ngTemplateOutlet]="createForm" />
+  </app-modal>
+}
+
+@if (editing(); as customer) {
+  <app-modal heading="Edit customer" (closed)="editingId.set(null)">
+    <form class="col" (submit)="save($event, customer)">
+      <div class="photo-row" [style.--customer]="customer.color">
+        <span class="portrait">
+          @if (customer.hasPhoto) {
+            <img [src]="photo(customer)" alt="Current customer photo" />
+          } @else {
+            <span aria-hidden="true">{{ initialsOf(customer.name) }}</span>
+          }
+        </span>
+        <button type="button" class="btn small" (click)="setPhoto(customer, true)">
+          {{ customer.hasPhoto ? 'Change photo' : 'Add photo' }}
+        </button>
+        @if (customer.hasPhoto) {
+          <button type="button" class="btn small" (click)="setPhoto(customer, false)">
+            Remove photo
+          </button>
+        }
+      </div>
+      <label class="field">
+        Customer name
+        <input name="name" required autofocus maxlength="80" [value]="customer.name" />
+      </label>
+      <label class="field">
+        Customer description
+        <textarea
+          name="description"
+          rows="3"
+          maxlength="500"
+          [value]="customer.description"
+        ></textarea>
+      </label>
+      <div class="row end">
+        <button type="button" class="btn" (click)="editingId.set(null)">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </app-modal>
+}

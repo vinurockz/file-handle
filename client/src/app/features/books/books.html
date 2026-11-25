@@ -1,0 +1,348 @@
+@if (cropTarget(); as target) {
+  <app-crop-modal [src]="url(target.mediaId)" [initial]="target.crop" (done)="cropped($event)" />
+}
+@if (!book()) {
+  <div class="page">
+    <header class="page-head">
+      <h1>Books</h1>
+      <button type="button" class="btn primary" (click)="createBook()">New book</button>
+    </header>
+    @if (books.loaded() && !books.items().length) {
+      <p class="empty">No books yet.</p>
+    }
+    <div class="tile-grid">
+      @for (item of books.items(); track item.id) {
+        <article class="tile" [style.border-top-color]="item.coverColor">
+          <button type="button" class="tile-open" (click)="openBook(item.id)">
+            <strong>📚 {{ item.title }}</strong>
+            <span class="muted">{{
+              item.pageLimit ? 'Limit ' + item.pageLimit + ' pages' : 'No page limit'
+            }}</span>
+          </button>
+          <div class="row end">
+            <input
+              type="color"
+              aria-label="Cover colour"
+              [value]="item.coverColor"
+              (change)="books.patch(item.id, { coverColor: $any($event.target).value }, 0)"
+            />
+            <button type="button" class="btn small" (click)="renameBook(item)">Rename</button>
+            <button type="button" class="btn small" (click)="setLimit(item)">Limit</button>
+            <button type="button" class="btn small danger" (click)="removeBook(item)">
+              Delete
+            </button>
+          </div>
+        </article>
+      }
+    </div>
+  </div>
+} @else if (mode() === 'print') {
+  <div class="print-area">
+    @for (item of pages.items(); track item.id) {
+      <div class="print-page"><app-page-view [page]="item" /></div>
+    }
+  </div>
+} @else {
+  <div class="editor">
+    <div class="toolbar no-print">
+      <button type="button" class="btn" (click)="closeBook()">← Books</button>
+      <strong class="grow truncate">{{ book()?.title }}</strong>
+      @if (mode() === 'edit') {
+        <button type="button" class="btn" [disabled]="!page()" (click)="addText()">+ Text</button>
+        <button type="button" class="btn" [disabled]="!page()" (click)="addImage()">+ Image</button>
+        <button type="button" class="btn" [disabled]="!page()" (click)="addShape('rectangle')">
+          ▭
+        </button>
+        <button
+          type="button"
+          class="btn"
+          [disabled]="!page()"
+          aria-label="Add ellipse"
+          (click)="addShape('ellipse')"
+        >
+          ◯
+        </button>
+        <button
+          type="button"
+          class="btn"
+          [disabled]="!page()"
+          aria-label="Add line"
+          (click)="addShape('line')"
+        >
+          ╱
+        </button>
+        <span class="sep"></span>
+        <button
+          type="button"
+          class="btn"
+          aria-label="Undo"
+          [disabled]="!history.canUndo()"
+          (click)="undo()"
+        >
+          ↶
+        </button>
+        <button
+          type="button"
+          class="btn"
+          aria-label="Redo"
+          [disabled]="!history.canRedo()"
+          (click)="redo()"
+        >
+          ↷
+        </button>
+        <button type="button" class="btn" [disabled]="!pages.items().length" (click)="read()">
+          Read
+        </button>
+      } @else {
+        <button type="button" class="btn" (click)="mode.set('edit')">Edit</button>
+      }
+      <button
+        type="button"
+        class="btn primary"
+        [disabled]="!pages.items().length"
+        (click)="print()"
+      >
+        Export PDF
+      </button>
+    </div>
+
+    @if (mode() === 'read') {
+      <div class="stage">
+        <div class="reader">
+          <app-page-view [page]="pages.items()[readIndex()]!" />
+          @if (turning(); as previous) {
+            @for (flip of [previous]; track flip.id + readIndex()) {
+              <div class="flip" (animationend)="turning.set(null)">
+                <app-page-view [page]="flip" />
+              </div>
+            }
+          }
+        </div>
+        <div class="row">
+          <button type="button" class="btn" [disabled]="readIndex() === 0" (click)="turn(-1)">
+            ← Previous
+          </button>
+          <span>{{ readIndex() + 1 }} / {{ pages.items().length }}</span>
+          <button
+            type="button"
+            class="btn"
+            [disabled]="readIndex() >= pages.items().length - 1"
+            (click)="turn(1)"
+          >
+            Next →
+          </button>
+        </div>
+      </div>
+    } @else {
+      <div class="workbench">
+        <aside class="panel" aria-label="Pages">
+          @for (item of pages.items(); track item.id; let i = $index) {
+            <button
+              type="button"
+              class="page-thumb"
+              [class.active]="item.id === pageId()"
+              (click)="openPage(item.id)"
+            >
+              <app-page-view [page]="item.id === pageId() ? page()! : item" />
+              <span>{{ label(i) }}</span>
+            </button>
+          }
+          <button type="button" class="btn" (click)="addPage()">+ Add page</button>
+          <button type="button" class="btn" [disabled]="!page()" (click)="addPage(true)">
+            Duplicate page
+          </button>
+          <div class="row">
+            <button
+              type="button"
+              class="btn small grow"
+              [disabled]="pageIndex() === 0"
+              (click)="shiftPage(-1)"
+            >
+              ↑ Move
+            </button>
+            <button
+              type="button"
+              class="btn small grow"
+              [disabled]="pageIndex() >= pages.items().length - 1"
+              (click)="shiftPage(1)"
+            >
+              ↓ Move
+            </button>
+          </div>
+          <button type="button" class="btn danger" [disabled]="!page()" (click)="removePage()">
+            Delete page
+          </button>
+        </aside>
+
+        <div class="stage">
+          @if (page(); as current) {
+            <div #canvas class="book-canvas">
+              <app-page-view
+                [page]="current"
+                [interactive]="true"
+                [selectedId]="selectedId()"
+                (picked)="selectedId.set($event)"
+                (gesture)="gesture($event)"
+              />
+            </div>
+          } @else if (pages.loaded()) {
+            <p class="empty">This book has no pages. Add one.</p>
+          }
+        </div>
+
+        <aside class="panel" aria-label="Properties">
+          @if (selected(); as item) {
+            <h3>{{ item.type }} settings</h3>
+            @if (item.type === 'text') {
+              <textarea
+                rows="5"
+                aria-label="Text"
+                [value]="item.text"
+                (input)="set({ text: $any($event.target).value })"
+              ></textarea>
+              <app-slider
+                label="Font size"
+                unit="px"
+                [min]="8"
+                [max]="120"
+                [value]="item.fontSize"
+                (changed)="set({ fontSize: $event })"
+              />
+              <select aria-label="Font" (change)="set({ fontFamily: $any($event.target).value })">
+                @for (font of ['sans', 'serif', 'mono']; track font) {
+                  <option [value]="font" [selected]="item.fontFamily === font">{{ font }}</option>
+                }
+              </select>
+              <div class="row wrap">
+                <input
+                  type="color"
+                  aria-label="Text colour"
+                  [value]="item.color"
+                  (input)="set({ color: $any($event.target).value })"
+                />
+                <button
+                  type="button"
+                  class="btn"
+                  [attr.aria-pressed]="item.bold"
+                  (click)="set({ bold: !item.bold })"
+                >
+                  <b>B</b>
+                </button>
+                <button
+                  type="button"
+                  class="btn"
+                  [attr.aria-pressed]="item.italic"
+                  (click)="set({ italic: !item.italic })"
+                >
+                  <i>I</i>
+                </button>
+                @for (side of ['left', 'center', 'right']; track side) {
+                  <button
+                    type="button"
+                    class="btn small"
+                    [attr.aria-pressed]="item.align === side"
+                    (click)="set({ align: $any(side) })"
+                  >
+                    {{ side }}
+                  </button>
+                }
+              </div>
+            }
+            @if (item.type === 'shape') {
+              <label class="field"
+                >Fill
+                <input
+                  type="color"
+                  [value]="item.fill"
+                  (input)="set({ fill: $any($event.target).value })"
+              /></label>
+            }
+            @if (item.type === 'image') {
+              <button type="button" class="btn" (click)="addImage(true)">Replace picture</button>
+              <button type="button" class="btn" (click)="cropping.set(item.id)">
+                Crop by dragging
+              </button>
+              <app-slider
+                label="Crop from left"
+                unit="%"
+                [max]="90"
+                [value]="round((item.crop?.x ?? 0) * 100)"
+                (changed)="setCrop('x', $event)"
+              />
+              <app-slider
+                label="Crop from top"
+                unit="%"
+                [max]="90"
+                [value]="round((item.crop?.y ?? 0) * 100)"
+                (changed)="setCrop('y', $event)"
+              />
+              <app-slider
+                label="Visible width"
+                unit="%"
+                [min]="5"
+                [value]="round((item.crop?.w ?? 1) * 100)"
+                (changed)="setCrop('w', $event)"
+              />
+              <app-slider
+                label="Visible height"
+                unit="%"
+                [min]="5"
+                [value]="round((item.crop?.h ?? 1) * 100)"
+                (changed)="setCrop('h', $event)"
+              />
+              <button type="button" class="btn small" (click)="set({ crop: null })">
+                Reset crop
+              </button>
+            }
+            <app-slider
+              label="Width"
+              unit="%"
+              [min]="5"
+              [max]="150"
+              [value]="round(item.width * 100)"
+              (changed)="set({ width: $event / 100 })"
+            />
+            <app-slider
+              label="Height"
+              unit="%"
+              [min]="2"
+              [max]="150"
+              [value]="round(item.height * 100)"
+              (changed)="set({ height: $event / 100 })"
+            />
+            <app-slider
+              label="Rotation"
+              unit="°"
+              [min]="-180"
+              [max]="180"
+              [value]="item.rotation"
+              (changed)="set({ rotation: $event })"
+            />
+            <div class="row wrap">
+              <button type="button" class="btn small" (click)="layer(1)">Bring forward</button>
+              <button type="button" class="btn small" (click)="layer(-1)">Send back</button>
+              <button type="button" class="btn small" (click)="duplicateSelected()">
+                Duplicate
+              </button>
+              <button type="button" class="btn small danger" (click)="deleteSelected()">
+                Delete
+              </button>
+            </div>
+          } @else if (page(); as current) {
+            <h3>Page</h3>
+            <label class="field"
+              >Background
+              <input
+                type="color"
+                [value]="current.background"
+                (input)="background($any($event.target).value)"
+            /></label>
+            <p class="muted">
+              Select something on the page to change it. Arrow keys nudge it; Delete removes it.
+            </p>
+          }
+        </aside>
+      </div>
+    }
+  </div>
+}

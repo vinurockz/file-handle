@@ -1,0 +1,741 @@
+@if (!opened() && embedded()) {
+  <div class="page">
+    <p class="empty" role="status">Opening the picture…</p>
+    <button type="button" class="btn" (click)="dismissed.emit()">← Back without replacing</button>
+  </div>
+} @else if (!opened()) {
+  <div class="page">
+    <header class="page-head">
+      <h1>Image Editor</h1>
+      <button type="button" class="btn primary" (click)="uploadPicture()">Upload picture</button>
+    </header>
+    <h2>New design</h2>
+    <div class="tile-grid">
+      @for (preset of canvasPresets; track preset.label) {
+        <article class="tile">
+          <button type="button" class="tile-open" (click)="newCanvas(preset.width, preset.height)">
+            <strong>＋ {{ preset.label }}</strong>
+          </button>
+        </article>
+      }
+    </div>
+    @if (saved().length) {
+      <h2>Continue editing</h2>
+      <div class="tile-grid">
+        @for (project of saved(); track project.id) {
+          <article class="tile">
+            <button type="button" class="tile-open" (click)="resume(project)">
+              <strong>🎨 {{ project.name }}</strong
+              ><span class="muted">{{ project.doc.layers?.length ?? 0 }} layers</span>
+              <span class="chip">{{
+                project.status === 'done' ? 'Done · edit again' : 'Draft · resume editing'
+              }}</span>
+            </button>
+            <div class="row end">
+              <button type="button" class="btn small danger" (click)="deleteProject(project)">
+                Delete
+              </button>
+            </div>
+          </article>
+        }
+      </div>
+    }
+    <h2>Edit a picture from your library</h2>
+    @if (library.loaded() && !pictures().length) {
+      <p class="empty">No pictures yet.</p>
+    }
+    <div class="media-grid">
+      @for (item of pictures(); track item.id) {
+        <button type="button" class="media-card" (click)="openPicture(item)">
+          <span class="thumb"
+            ><img [src]="'/api/media/' + item.id + '/file'" alt="" loading="lazy"
+          /></span>
+          <span class="media-title">{{ item.title }}</span>
+        </button>
+      }
+    </div>
+  </div>
+} @else {
+  <div class="editor">
+    <div>
+      <div class="toolbar">
+        <button type="button" class="btn" (click)="close()">
+          {{ embedded() ? '← Back without replacing' : '← Designs' }}
+        </button>
+        <button type="button" class="btn ghost grow truncate" title="Rename" (click)="rename()">
+          <strong>{{ opened()!.name }}</strong>
+        </button>
+        <button
+          type="button"
+          class="btn"
+          aria-label="Undo"
+          [disabled]="!history.canUndo()"
+          (click)="history.undo()"
+        >
+          ↶
+        </button>
+        <button
+          type="button"
+          class="btn"
+          aria-label="Redo"
+          [disabled]="!history.canRedo()"
+          (click)="history.redo()"
+        >
+          ↷
+        </button>
+        <span class="sep"></span>
+        <button
+          type="button"
+          class="btn"
+          aria-label="Zoom out"
+          (click)="zoom.set(zoom() / 1.25 > 0.05 ? zoom() / 1.25 : zoom())"
+        >
+          −
+        </button>
+        <button type="button" class="btn" title="Fit to screen" (click)="fit()">
+          {{ percent(zoom()) }}%
+        </button>
+        <button
+          type="button"
+          class="btn"
+          aria-label="Zoom in"
+          (click)="zoom.set(zoom() * 1.25 < 6 ? zoom() * 1.25 : zoom())"
+        >
+          +
+        </button>
+        <span class="sep"></span>
+        <select aria-label="Export format" (change)="exportFormat.set($any($event.target).value)">
+          <option value="image/png">PNG</option>
+          <option value="image/jpeg">JPG</option>
+          <option value="image/webp">WebP</option>
+        </select>
+        <button type="button" class="btn" [disabled]="busy()" (click)="save(true)">Download</button>
+        <button type="button" class="btn primary" [disabled]="busy()" (click)="save(false)">
+          Save to library
+        </button>
+      </div>
+      <div class="toolbar" role="toolbar" aria-label="Tools">
+        @for (item of tools; track item.id) {
+          <button
+            type="button"
+            class="btn small"
+            [attr.aria-pressed]="tool() === item.id"
+            (click)="tool.set(item.id); cropArea.set(null)"
+          >
+            {{ item.label }}
+          </button>
+        }
+        <span class="sep"></span>
+        <button type="button" class="btn small" (click)="rotate(false)">⟲ 90°</button>
+        <button type="button" class="btn small" (click)="rotate(true)">⟳ 90°</button>
+        <button type="button" class="btn small" (click)="flip('h')">⇋ Flip</button>
+        <button type="button" class="btn small" (click)="flip('v')">⥮ Flip</button>
+        @if (tool() === 'crop') {
+          <span class="sep"></span>
+          <button
+            type="button"
+            class="btn small primary"
+            [disabled]="!cropArea()"
+            (click)="confirmCrop()"
+          >
+            Apply crop
+          </button>
+          <button type="button" class="btn small" [disabled]="!doc().crop" (click)="clearCrop()">
+            Remove crop
+          </button>
+        }
+        @if (tool() === 'lasso') {
+          <span class="sep"></span>
+          <button
+            type="button"
+            class="btn small"
+            [attr.aria-pressed]="lassoMode() === 'wand'"
+            (click)="lassoMode.set('wand'); clearSelection()"
+          >
+            Magic wand
+          </button>
+          <button
+            type="button"
+            class="btn small"
+            [attr.aria-pressed]="lassoMode() === 'freehand'"
+            (click)="lassoMode.set('freehand'); clearSelection()"
+          >
+            Freehand
+          </button>
+          @if (lassoMode() === 'wand') {
+            <label class="row"
+              >Tolerance
+              <input
+                type="range"
+                min="0"
+                max="100"
+                [value]="tolerance()"
+                (input)="setTolerance(+$any($event.target).value)"
+              />
+              {{ tolerance() }}</label
+            >
+          }
+          <button
+            type="button"
+            class="btn small primary"
+            [disabled]="!selection() || busy()"
+            (click)="useSelection(true)"
+          >
+            Cut out as layer
+          </button>
+          <button
+            type="button"
+            class="btn small"
+            [disabled]="!selection() || busy()"
+            (click)="useSelection(false)"
+          >
+            Save as new picture
+          </button>
+          <button
+            type="button"
+            class="btn small"
+            [disabled]="!selection()"
+            (click)="clearSelection()"
+          >
+            Cancel selection
+          </button>
+        }
+        @if (tool() === 'draw' || tool() === 'erase') {
+          <span class="sep"></span>
+          <button type="button" class="btn small" (click)="clearDrawing()">Clear drawing</button>
+          @if (tool() === 'draw') {
+            <input
+              type="color"
+              aria-label="Brush colour"
+              [value]="brushColor()"
+              (input)="brushColor.set($any($event.target).value)"
+            />
+          }
+          <label class="row"
+            >Size
+            <input
+              type="range"
+              min="1"
+              max="150"
+              [value]="brushSize()"
+              (input)="brushSize.set(+$any($event.target).value)"
+            />
+            {{ brushSize() }}px</label
+          >
+        }
+      </div>
+    </div>
+
+    <div class="workbench">
+      <aside class="panel" aria-label="Add and layers">
+        <h3>Add</h3>
+        <div class="palette">
+          <button type="button" class="btn" (click)="addText('middle')">Text</button>
+          <button type="button" class="btn" (click)="addText('top')">Top caption</button>
+          <button type="button" class="btn" (click)="addText('bottom')">Bottom caption</button>
+          <button type="button" class="btn" (click)="addBubble()">Speech bubble</button>
+          <button type="button" class="btn" (click)="addPictures()">Picture</button>
+        </div>
+        <div class="grid4">
+          @for (shape of shapes; track shape.id) {
+            <button
+              type="button"
+              class="btn"
+              [title]="shape.id"
+              [attr.aria-label]="'Add ' + shape.id"
+              (click)="addShape(shape.id)"
+            >
+              {{ shape.icon }}
+            </button>
+          }
+        </div>
+        <details class="group">
+          <summary>Stickers</summary>
+          <div class="grid4">
+            @for (sticker of stickers; track sticker) {
+              <button type="button" class="btn" (click)="addSticker(sticker)">{{ sticker }}</button>
+            }
+          </div>
+        </details>
+        <h3>Layers</h3>
+        @for (item of layersTopFirst(); track item.id) {
+          <div class="list-item" [class.selected]="item.id === selectedId()">
+            <button type="button" class="pick" (click)="selectedId.set(item.id); tool.set('move')">
+              {{ layerName(item) }}
+            </button>
+            <button
+              type="button"
+              class="btn ghost icon"
+              [attr.aria-label]="item.hidden ? 'Show layer' : 'Hide layer'"
+              (click)="layer(item.id, { hidden: !item.hidden })"
+            >
+              {{ item.hidden ? '🙈' : '👁' }}
+            </button>
+            <button
+              type="button"
+              class="btn ghost icon"
+              [attr.aria-label]="item.locked ? 'Unlock layer' : 'Lock layer'"
+              (click)="layer(item.id, { locked: !item.locked })"
+            >
+              {{ item.locked ? '🔒' : '🔓' }}
+            </button>
+          </div>
+        } @empty {
+          <p class="muted">No layers yet.</p>
+        }
+        <button
+          type="button"
+          class="btn"
+          [class.active]="!selectedId()"
+          (click)="selectedId.set(null)"
+        >
+          Photo and canvas settings
+        </button>
+      </aside>
+
+      <div class="stage checker" #stage>
+        <div
+          class="canvas-wrap"
+          [style.width.px]="box().width * zoom()"
+          [style.height.px]="box().height * zoom()"
+        >
+          <canvas
+            #canvas
+            aria-label="Design canvas"
+            [class.crosshair]="tool() !== 'move'"
+            (pointerdown)="pointerDown($event)"
+          ></canvas>
+          @if (selected(); as item) {
+            @if (!item.hidden && !item.locked && item.type !== 'draw' && tool() === 'move') {
+              <div
+                class="selection"
+                [style.left.px]="(box().originX + item.x - item.w / 2) * zoom()"
+                [style.top.px]="(box().originY + item.y - item.h / 2) * zoom()"
+                [style.width.px]="item.w * zoom()"
+                [style.height.px]="item.h * zoom()"
+                [style.rotate]="item.rotation + 'deg'"
+              >
+                <button
+                  type="button"
+                  class="handle turn"
+                  aria-label="Rotate layer"
+                  (pointerdown)="dragLayer($event, item, 'rotate')"
+                ></button>
+                <button
+                  type="button"
+                  class="handle size"
+                  aria-label="Resize layer"
+                  (pointerdown)="dragLayer($event, item, 'resize')"
+                ></button>
+              </div>
+            }
+          }
+          @if (tool() === 'lasso') {
+            <canvas #overlay class="selection-overlay" aria-hidden="true"></canvas>
+            @if (selection(); as chosen) {
+              @for (corner of corners; track corner) {
+                <button
+                  type="button"
+                  class="handle corner"
+                  [attr.aria-label]="'Resize selection ' + corner"
+                  [style.left.px]="
+                    (corner.endsWith('w') ? chosen.bounds.x : chosen.bounds.x + chosen.bounds.w) *
+                      zoom() -
+                    8
+                  "
+                  [style.top.px]="
+                    (corner.startsWith('n') ? chosen.bounds.y : chosen.bounds.y + chosen.bounds.h) *
+                      zoom() -
+                    8
+                  "
+                  (pointerdown)="resizeSelection($event, corner)"
+                ></button>
+              }
+            }
+          }
+          @if (cropArea(); as area) {
+            <div
+              class="crop-box"
+              [style.left.px]="(box().originX + area.x * box().photo.width) * zoom()"
+              [style.top.px]="(box().originY + area.y * box().photo.height) * zoom()"
+              [style.width.px]="area.w * box().photo.width * zoom()"
+              [style.height.px]="area.h * box().photo.height * zoom()"
+            ></div>
+          }
+        </div>
+      </div>
+
+      <aside class="panel" aria-label="Properties">
+        @if (selected(); as item) {
+          <h3>{{ item.type }} layer</h3>
+          @if (item.type === 'text' || item.type === 'bubble') {
+            <textarea
+              rows="3"
+              aria-label="Layer text"
+              [value]="item.text"
+              (input)="edit({ text: $any($event.target).value })"
+            ></textarea>
+            <select aria-label="Font" (change)="edit({ fontFamily: $any($event.target).value })">
+              @for (font of fonts; track font.label) {
+                <option [value]="font.value" [selected]="item.fontFamily === font.value">
+                  {{ font.label }}
+                </option>
+              }
+            </select>
+            <div class="row wrap">
+              <button
+                type="button"
+                class="btn"
+                [attr.aria-pressed]="item.bold"
+                (click)="edit({ bold: !item.bold })"
+              >
+                <b>B</b>
+              </button>
+              <button
+                type="button"
+                class="btn"
+                [attr.aria-pressed]="item.italic"
+                (click)="edit({ italic: !item.italic })"
+              >
+                <i>I</i>
+              </button>
+              @for (side of aligns; track side) {
+                <button
+                  type="button"
+                  class="btn small"
+                  [attr.aria-pressed]="item.align === side"
+                  (click)="edit({ align: side })"
+                >
+                  {{ side }}
+                </button>
+              }
+            </div>
+            <app-slider
+              label="Font size"
+              unit="px"
+              [min]="8"
+              [max]="800"
+              [value]="round(item.fontSize)"
+              (changed)="edit({ fontSize: $event })"
+            />
+            <label class="field"
+              >Text colour
+              <input
+                type="color"
+                [value]="item.color"
+                (input)="edit({ color: $any($event.target).value })"
+            /></label>
+          }
+          @if (item.type === 'text') {
+            <app-slider
+              label="Outline"
+              unit="px"
+              [max]="40"
+              [value]="item.strokeWidth"
+              (changed)="edit({ strokeWidth: $event })"
+            />
+            <label class="field"
+              >Outline colour
+              <input
+                type="color"
+                [value]="item.stroke"
+                (input)="edit({ stroke: $any($event.target).value })"
+            /></label>
+          }
+          @if (item.type === 'bubble') {
+            <label class="field"
+              >Bubble colour
+              <input
+                type="color"
+                [value]="item.fill"
+                (input)="edit({ fill: $any($event.target).value })"
+            /></label>
+          }
+          @if (item.type === 'shape') {
+            @if (item.shape !== 'line' && item.shape !== 'arrow') {
+              <label class="check"
+                ><input
+                  type="checkbox"
+                  [checked]="!!item.fill"
+                  (change)="edit({ fill: $any($event.target).checked ? '#4f46e5' : '' })"
+                />
+                Fill</label
+              >
+              @if (item.fill) {
+                <input
+                  type="color"
+                  aria-label="Fill colour"
+                  [value]="item.fill"
+                  (input)="edit({ fill: $any($event.target).value })"
+                />
+              }
+            }
+            <app-slider
+              label="Border"
+              unit="px"
+              [max]="80"
+              [value]="item.strokeWidth"
+              (changed)="edit({ strokeWidth: $event })"
+            />
+            <label class="field"
+              >Line colour
+              <input
+                type="color"
+                [value]="item.stroke"
+                (input)="edit({ stroke: $any($event.target).value })"
+            /></label>
+          }
+          @if ((item.type === 'shape' && item.shape === 'rect') || item.type === 'image') {
+            <app-slider
+              label="Corner radius"
+              unit="px"
+              [max]="500"
+              [value]="item.radius"
+              (changed)="edit({ radius: $event })"
+            />
+          }
+          @if (item.type !== 'draw') {
+            <app-slider
+              label="Rotation"
+              unit="°"
+              [min]="-180"
+              [max]="180"
+              [value]="item.rotation"
+              (changed)="edit({ rotation: $event })"
+            />
+            <div class="grid3">
+              <button type="button" class="btn small" (click)="alignLayer('left', null)">
+                ⇤ Left
+              </button>
+              <button type="button" class="btn small" (click)="alignLayer('center', null)">
+                ↔ Centre
+              </button>
+              <button type="button" class="btn small" (click)="alignLayer('right', null)">
+                Right ⇥
+              </button>
+              <button type="button" class="btn small" (click)="alignLayer(null, 'top')">
+                ⤒ Top
+              </button>
+              <button type="button" class="btn small" (click)="alignLayer(null, 'middle')">
+                ↕ Middle
+              </button>
+              <button type="button" class="btn small" (click)="alignLayer(null, 'bottom')">
+                ⤓ Bottom
+              </button>
+            </div>
+          }
+          <app-slider
+            label="Opacity"
+            unit="%"
+            [value]="round(item.opacity * 100)"
+            (changed)="edit({ opacity: $event / 100 })"
+          />
+          <label class="field"
+            >Blend mode
+            <select (change)="edit({ blend: $any($event.target).value })">
+              @for (mode of blendModes; track mode) {
+                <option [value]="mode" [selected]="item.blend === mode">
+                  {{ mode === 'source-over' ? 'normal' : mode }}
+                </option>
+              }
+            </select>
+          </label>
+          <label class="check"
+            ><input
+              type="checkbox"
+              [checked]="item.shadow.enabled"
+              (change)="editShadow({ enabled: $any($event.target).checked })"
+            />
+            Drop shadow</label
+          >
+          @if (item.shadow.enabled) {
+            <input
+              type="color"
+              aria-label="Shadow colour"
+              [value]="item.shadow.color"
+              (input)="editShadow({ color: $any($event.target).value })"
+            />
+            <app-slider
+              label="Shadow blur"
+              unit="px"
+              [max]="100"
+              [value]="item.shadow.blur"
+              (changed)="editShadow({ blur: $event })"
+            />
+            <app-slider
+              label="Shadow X"
+              unit="px"
+              [min]="-100"
+              [max]="100"
+              [value]="item.shadow.dx"
+              (changed)="editShadow({ dx: $event })"
+            />
+            <app-slider
+              label="Shadow Y"
+              unit="px"
+              [min]="-100"
+              [max]="100"
+              [value]="item.shadow.dy"
+              (changed)="editShadow({ dy: $event })"
+            />
+          }
+          <div class="row wrap">
+            <button type="button" class="btn small" (click)="reorder(1)">Bring forward</button>
+            <button type="button" class="btn small" (click)="reorder(-1)">Send back</button>
+            <button type="button" class="btn small" (click)="duplicate()">Duplicate</button>
+            <button type="button" class="btn small danger" (click)="removeLayer()">Delete</button>
+          </div>
+        } @else {
+          <details class="group" open>
+            <summary>Filters</summary>
+            <div class="palette">
+              @for (item of presets; track item.name) {
+                <button type="button" class="btn" (click)="preset(item.values)">
+                  {{ item.name }}
+                </button>
+              }
+            </div>
+          </details>
+          <details class="group" open>
+            <summary>Adjustments</summary>
+            @for (slider of sliders; track slider.key) {
+              <app-slider
+                [label]="slider.label"
+                [unit]="slider.unit"
+                [min]="slider.min"
+                [max]="slider.max"
+                [value]="doc().adjustments[slider.key]"
+                (changed)="adjust(slider.key, $event)"
+              />
+            }
+          </details>
+          @if (!doc().base.mediaId) {
+            <details class="group" open>
+              <summary>Canvas</summary>
+              <div class="row">
+                <label class="field"
+                  >Width
+                  <input
+                    type="number"
+                    min="16"
+                    max="4096"
+                    [value]="doc().base.width"
+                    (change)="resize('width', $any($event.target).value)"
+                /></label>
+                <label class="field"
+                  >Height
+                  <input
+                    type="number"
+                    min="16"
+                    max="4096"
+                    [value]="doc().base.height"
+                    (change)="resize('height', $any($event.target).value)"
+                /></label>
+              </div>
+              <label class="field"
+                >Background
+                <input
+                  type="color"
+                  [value]="doc().background"
+                  (input)="set({ background: $any($event.target).value }, 'bg')"
+              /></label>
+              <label class="check"
+                ><input
+                  type="checkbox"
+                  [checked]="!!doc().background2"
+                  (change)="set({ background2: $any($event.target).checked ? '#a78bfa' : '' })"
+                />
+                Gradient</label
+              >
+              @if (doc().background2) {
+                <input
+                  type="color"
+                  aria-label="Second gradient colour"
+                  [value]="doc().background2"
+                  (input)="set({ background2: $any($event.target).value }, 'bg2')"
+                />
+              }
+            </details>
+          }
+          <details class="group">
+            <summary>Frame</summary>
+            <app-slider
+              label="Frame width"
+              unit="px"
+              [max]="200"
+              [value]="doc().frame.width"
+              (changed)="frame({ width: $event })"
+            />
+            <app-slider
+              label="Rounded photo corners"
+              unit="px"
+              [max]="500"
+              [value]="doc().frame.radius"
+              (changed)="frame({ radius: $event })"
+            />
+            <input
+              type="color"
+              aria-label="Frame colour"
+              [value]="doc().frame.color"
+              (input)="frame({ color: $any($event.target).value })"
+            />
+          </details>
+          <details class="group">
+            <summary>Photo body</summary>
+            <app-slider
+              label="Photo border"
+              unit="px"
+              [max]="100"
+              [value]="doc().photoStyle.borderWidth"
+              (changed)="photoStyle({ borderWidth: $event })"
+            />
+            <app-slider
+              label="Photo opacity"
+              unit="%"
+              [value]="round(doc().photoStyle.opacity * 100)"
+              (changed)="photoStyle({ opacity: $event / 100 })"
+            />
+            <input
+              type="color"
+              aria-label="Photo border colour"
+              [value]="doc().photoStyle.borderColor"
+              (input)="photoStyle({ borderColor: $any($event.target).value })"
+            />
+          </details>
+          @for (item of sectionDefs; track item.key) {
+            <details class="group">
+              <summary>{{ item.label }}{{ doc().sections[item.key].enabled ? ' ✓' : '' }}</summary>
+              <app-band-panel
+                [label]="item.label"
+                [band]="doc().sections[item.key]"
+                (changed)="section(item.key, $event)"
+              />
+            </details>
+          }
+          <details class="group">
+            <summary>Export options</summary>
+            <app-slider
+              label="Export size"
+              unit="%"
+              [min]="10"
+              [max]="200"
+              [value]="exportScale()"
+              (changed)="exportScale.set($event)"
+            />
+            <app-slider
+              label="JPG / WebP quality"
+              unit="%"
+              [min]="10"
+              [value]="exportQuality()"
+              (changed)="exportQuality.set($event)"
+            />
+            <small class="muted"
+              >{{ round((box().width * exportScale()) / 100) }} ×
+              {{ round((box().height * exportScale()) / 100) }} px</small
+            >
+          </details>
+        }
+      </aside>
+    </div>
+  </div>
+}

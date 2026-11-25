@@ -1,0 +1,80 @@
+:host {
+  display: block;
+  height: 100%;
+}
+.stage {
+  align-items: stretch;
+  background: var(--surface-2);
+}
+.preview {
+  display: block;
+  align-self: center;
+  max-width: 100%;
+  max-height: 55vh;
+  background: #000;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.clock {
+  font-variant-numeric: tabular-nums;
+}
+.timeline {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  background: #1b1f33;
+  padding: 6px;
+  border-radius: 8px;
+  min-height: 92px;
+}
+.timeline .empty {
+  color: #cbd0ee;
+  margin: auto;
+  padding: 0.5rem;
+}
+.clip {
+  flex: 1 1 0;
+  min-width: 110px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  cursor: grab;
+  font: inherit;
+  position: relative;
+  height: 76px;
+}
+.clip.selected {
+  border-color: #fbbf24;
+}
+.clip video,
+.clip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.65;
+  pointer-events: none;
+}
+.clip span {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 3px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 3px #000;
+}
+.job {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}

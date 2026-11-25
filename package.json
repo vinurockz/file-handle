@@ -1,0 +1,20 @@
+{
+  "name": "studio",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "scripts": {
+    "setup": "npm install --prefix server && npm install --prefix client && npm install --prefix e2e",
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build --prefix client",
+    "start": "npm start --prefix server",
+    "typecheck": "npm run typecheck --prefix server && npm run typecheck --prefix client",
+    "test": "npm test --prefix server && npm test --prefix client",
+    "e2e": "npm run build && npm test --prefix e2e",
+    "verify": "npm run typecheck && npm test && npm run e2e",
+    "format": "node client/node_modules/prettier/bin/prettier.cjs --config client/.prettierrc --write \"client/src/**/*.{ts,html,scss}\" \"server/{src,test}/**/*.ts\" \"e2e/**/*.ts\" \"!e2e/node_modules/**\""
+  }
+}
